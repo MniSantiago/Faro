@@ -207,7 +207,7 @@ describe('GitWorkspaces', () => {
   it('push sube la rama base al remoto', async () => {
     const { repo, project } = setup();
     const bare = tmpDir('faro-remote-');
-    gitSync(bare, 'init', '-q', '--bare');
+    gitSync(bare, 'init', '-q', '--bare', '-b', 'main');
     gitSync(repo, 'remote', 'add', 'origin', bare);
     const task = await withWork(project);
     await ws.merge(project, task);

@@ -15,7 +15,7 @@ import { fixture, gitSync, makeConfig, makeRepo, tmpDir } from './helpers';
 function setup() {
   const repo = makeRepo();
   const origin = path.join(tmpDir(), 'origin.git');
-  gitSync(repo, 'init', '-q', '--bare', origin);
+  gitSync(repo, 'init', '-q', '--bare', '-b', 'main', origin);
   gitSync(repo, 'remote', 'add', 'origin', origin);
   gitSync(repo, 'push', '-q', 'origin', 'main');
   const config = makeConfig(repo);

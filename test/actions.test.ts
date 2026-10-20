@@ -142,7 +142,7 @@ describe('ReviewActions', () => {
   it('approvePush sube main y marca la aprobación', async () => {
     const { repo, store, actions, id } = await inReview();
     const bare = tmpDir('faro-remote-');
-    gitSync(bare, 'init', '-q', '--bare');
+    gitSync(bare, 'init', '-q', '--bare', '-b', 'main');
     gitSync(repo, 'remote', 'add', 'origin', bare);
     await actions.approve(id);
     await actions.approvePush(id);
