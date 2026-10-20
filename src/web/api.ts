@@ -1,3 +1,7 @@
+import type {
+  ConfigFull, ConfigGeneralView, ConfigProfileView, ConfigProjectView, ConfigRoutineView, GeneralUpdateBody,
+  ProfileCreateBody, ProfileUpdateBody, ProjectUpdateBody, RoutineCreateBody, RoutineUpdateBody,
+} from '../server/api-config';
 import type { BacklogItem } from '../server/backlog';
 import type { HomeMetric, HomeView, SeriesView } from '../server/home';
 import type { Card } from '../server/metrics/summary';
@@ -88,6 +92,16 @@ export const api = {
   metrics: (project: string) => req<MetricsView>('GET', `/api/metrics?project=${encodeURIComponent(project)}`),
   refreshMetrics: () => req<{ ok: boolean }>('POST', '/api/metrics/refresh'),
   config: () => req<ConfigView>('GET', '/api/config'),
+  // Panel de configuración: cada escritura devuelve la misma vista del elemento que GET /api/config/full.
+  configFull: () => req<ConfigFull>('GET', '/api/config/full'),
+  createRoutineConfig: (b: RoutineCreateBody) => req<ConfigRoutineView>('POST', '/api/config/routines', b),
+  saveRoutineConfig: (id: string, b: RoutineUpdateBody) => req<ConfigRoutineView>('PUT', `/api/config/routines/${encodeURIComponent(id)}`, b),
+  deleteRoutineConfig: (id: string) => req<{ ok: true }>('DELETE', `/api/config/routines/${encodeURIComponent(id)}`),
+  createProfileConfig: (b: ProfileCreateBody) => req<ConfigProfileView>('POST', '/api/config/profiles', b),
+  saveProfileConfig: (id: string, b: ProfileUpdateBody) => req<ConfigProfileView>('PUT', `/api/config/profiles/${encodeURIComponent(id)}`, b),
+  deleteProfileConfig: (id: string) => req<{ ok: true }>('DELETE', `/api/config/profiles/${encodeURIComponent(id)}`),
+  saveProjectConfig: (id: string, b: ProjectUpdateBody) => req<ConfigProjectView>('PATCH', `/api/config/projects/${encodeURIComponent(id)}`, b),
+  saveGeneralConfig: (b: GeneralUpdateBody) => req<ConfigGeneralView>('PATCH', '/api/config/general', b),
   routines: () => req<RoutineView[]>('GET', '/api/routines'),
   runRoutine: (id: string) => req<Task>('POST', `/api/routines/${id}/run`),
   toggleRoutine: (id: string) => req<unknown>('POST', `/api/routines/${id}/toggle`),

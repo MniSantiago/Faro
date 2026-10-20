@@ -38,16 +38,16 @@ function setup(seed?: (store: Store) => void) {
   const config = live.config;
   scheduler = new Scheduler({ store, config, actions: { createTask: vi.fn() } });
   scheduler.sync();
-  const secret = vi.fn(async (n: string) => (n === 'revenuecat' ? 'sk' : null));
+  const secretExists = vi.fn(async (n: string) => n === 'revenuecat');
   const app = buildApp({
-    store, config, live, secret, claudeVersion: async () => '9.9.9 (Claude Code)',
+    store, config, live, secretExists, claudeVersion: () => '9.9.9 (Claude Code)',
     actions: {} as never, orchestrator: {} as never, bus, scheduler, releases: {} as never,
   });
   const auth = new Auth({ store });
   const cookie = auth.pair(auth.createPairingCode().code, 'iPhone').cookie.split(';')[0]!;
   const local = (o: InjectOptions) => app.inject({ ...o, headers: { host: '127.0.0.1:3200', 'x-faro': '1', ...o.headers } });
   const remote = (o: InjectOptions) => app.inject({ ...o, headers: { host: 'faro.tailnet.ts.net', cookie, 'x-faro': '1', ...o.headers } });
-  return { app, store, live, config, messages, local, remote };
+  return { app, store, live, config, messages, local, remote, secretExists };
 }
 
 const nueva = { projectId: 'demo', name: 'Revisión de dependencias', title: 'Deps {fecha}', prompt: 'Revisa las dependencias', profileId: 'dev', level: 2, cron: '0 8 * * 1' };
@@ -88,14 +88,20 @@ describe('API de configuración', () => {
   });
 
   it('vinculado: un cuerpo de nivel 2 sobre una rutina del archivo de nivel 3 → 403 (el «antes» sale de la config)', async () => {
-    const { remote, config } = setup();
+    const { remote, local, config } = setup();
     const r = await remote({ method: 'PUT', url: '/api/config/routines/despliegue', payload: { level: 2, prompt: 'Otra cosa' } });
     expect(r.statusCode).toBe(403);
     expect(r.json().error).toContain('rutina de nivel 3 o 4');
     expect(config.projects[0]!.routines!.find((x) => x.id === 'despliegue')).toMatchObject({ level: 3, prompt: 'Integra' });
-    // Un «before» falsificado en el cuerpo no es un campo: 400.
-    const forged = await remote({ method: 'PUT', url: '/api/config/routines/despliegue', payload: { level: 2, before: { level: 1 } } });
-    expect(forged.statusCode).toBe(400);
+    // Un «before» falsificado, el id o el proyecto en el cuerpo no son campos editables: 400.
+    for (const extra of [{ before: { level: 1 } }, { id: 'otra' }, { projectId: 'demo' }]) {
+      const r2 = await remote({ method: 'PUT', url: '/api/config/routines/despliegue', payload: { level: 2, ...extra } });
+      expect(r2.statusCode).toBe(400);
+    }
+    for (const extra of [{ id: 'otra' }, { projectId: 'demo' }]) {
+      expect((await local({ method: 'PUT', url: '/api/config/routines/diaria', payload: { name: 'X', ...extra } })).statusCode).toBe(400);
+    }
+    expect(config.projects[0]!.routines!.find((x) => x.id === 'diaria')!.name).toBe('Diaria');
   });
 
   it('un override guardado que no se aplica no cuela su nivel al editar desde un vinculado', async () => {
@@ -203,6 +209,37 @@ describe('API de configuración', () => {
     const bad = await local({ method: 'PATCH', url: '/api/config/general', payload: { coordinatorProfile: 'fantasma' } });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error).toContain('perfil desconocido');
+  });
+
+  it('PATCH de Proyecto y Generales sobre un override guardado que no se aplica: sale bien y lo sustituye', async () => {
+    const at = '2026-10-20T10:00:00.000Z';
+    const { local, live, config } = setup((store) => {
+      store.setOverride({ kind: 'project', id: 'demo', origin: 'file', data: { contextWindow: -5 }, updatedAt: at, deviceId: null });
+      store.setOverride({ kind: 'general', id: 'general', origin: 'file', data: { maxConcurrentRuns: 0 }, updatedAt: at, deviceId: null });
+    });
+    expect(live.ignored().map((i) => i.kind).sort()).toEqual(['general', 'project']);
+    const p = await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { baseBranch: 'dev' } });
+    expect(p.statusCode).toBe(200);
+    const g = await local({ method: 'PATCH', url: '/api/config/general', payload: { title: 'Mío' } });
+    expect(g.statusCode).toBe(200);
+    expect(live.ignored()).toEqual([]);
+    expect(config).toMatchObject({ title: 'Mío', maxConcurrentRuns: 2 });
+    expect(config.projects[0]).toMatchObject({ baseBranch: 'dev' });
+    expect(config.projects[0]!.contextWindow).toBeUndefined();
+  });
+
+  it('las respuestas de escritura son la misma vista que GET /full (secretos y versión reales); secretos cacheados', async () => {
+    const { local, secretExists } = setup();
+    const f = await full(local);
+    const p = (await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { contextWindow: 100000 } })).json();
+    expect(p).toEqual({ ...f.projects[0], contextWindow: 100000, origin: 'editada', overridden: ['contextWindow'] });
+    const g = (await local({ method: 'PATCH', url: '/api/config/general', payload: { title: 'Mío' } })).json();
+    expect(g).toEqual({ ...f.general, title: 'Mío', origin: 'editada', overridden: ['title'] });
+    const r = (await local({ method: 'PUT', url: '/api/config/routines/diaria', payload: { name: 'Otra' } })).json();
+    expect(r).toEqual({ ...f.routines[0], name: 'Otra', origin: 'editada', overridden: ['name'], nextRunAt: expect.any(String) });
+    await full(local);
+    // Una consulta por secreto en todo el minuto, y sin leer su valor.
+    expect(secretExists).toHaveBeenCalledTimes(5);
   });
 
   it('GET /api/config/full: orígenes, contextos, secretos y lo editable según quién pregunta', async () => {

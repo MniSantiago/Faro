@@ -120,9 +120,11 @@ describe('editableBy', () => {
   it('vinculado: rutinas por nivel y release', () => {
     expect(editableBy(remote, 'routine', 'r1', config)).toEqual({ ok: true });
     no(editableBy(remote, 'routine', 'r3', config));
-    expect(editableBy(remote, 'routine', 'rel', config)).toEqual({
-      ok: false, reason: 'Desde un dispositivo vinculado no se pueden editar rutinas que publican en la tienda',
-    });
+    expect(editableBy(remote, 'routine', 'rel', config)).toEqual({ ok: false, reason: 'Se edita en faro.config.ts' });
+  });
+  it('una rutina con release no se edita desde el panel, tampoco en el Mac', () => {
+    expect(editableBy(mac, 'routine', 'rel', config)).toEqual({ ok: false, reason: 'Se edita en faro.config.ts' });
+    expect(editableBy(mac, 'routine', 'r1', config)).toEqual({ ok: true });
   });
   it('vinculado: perfiles', () => {
     expect(editableBy(remote, 'profile', 'dev', config)).toEqual({ ok: true });

@@ -51,10 +51,10 @@ export interface ApiDeps {
   config: FaroConfig;
   /** Config viva con los overrides del panel (`config` es su `live.config`); sin ella, las rutas `/api/config/*` del panel no existen. */
   live?: LiveConfig;
-  /** Para el estado de los secretos en el panel (por defecto, el llavero). */
-  secret?: (name: SecretName) => Promise<string | null>;
-  /** Versión de la CLI `claude` para la pestaña Generales; sin ella, null. */
-  claudeVersion?: () => Promise<string | null>;
+  /** ¿Existe el secreto? Para el estado conectado / falta del panel (por defecto, el llavero sin leer el valor). */
+  secretExists?: (name: SecretName) => Promise<boolean>;
+  /** Versión de la CLI `claude` ya conocida (se pregunta al arrancar, en segundo plano); null si aún no se sabe o falló. */
+  claudeVersion?: () => string | null;
   actions: ReviewActions;
   orchestrator: Pick<Orchestrator, 'queueState' | 'resume'>;
   bus: Bus;

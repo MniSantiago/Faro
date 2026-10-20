@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { addSecretCommand, envSecretName, readSecret, takeEnvSecrets } from '../src/server/keychain';
+import { readFileSync } from 'node:fs';
+import { addSecretCommand, envSecretName, readSecret, secretExists, takeEnvSecrets } from '../src/server/keychain';
+import { tmpDir } from './helpers';
 
 const securityBin = path.resolve('test/fake-security.sh');
 
@@ -34,6 +36,23 @@ describe('llavero', () => {
     expect(await readSecret('asc-p8', { securityBin, env })).toBe(pem);
     // Un valor hex sin saltos de línea es un valor normal.
     expect(await readSecret('posthog', { securityBin, env })).toBe('abcd1234');
+  });
+
+  it('secretExists: consulta sin -w (no lee el valor) y «no encontrado» no se registra', async () => {
+    const log = path.join(tmpDir(), 'security.log');
+    const env: NodeJS.ProcessEnv = { ...process.env, FAKE_SECURITY_LOG: log, FAKE_SECRET_revenuecat: 'sk_abc' };
+    delete env.FAKE_SECRET_posthog;
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await secretExists('revenuecat', { securityBin, env })).toBe(true);
+    expect(await secretExists('posthog', { securityBin, env })).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(await secretExists('posthog', { securityBin: '/no/existe/security', env })).toBe(false);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual([
+      'find-generic-password -s faro -a revenuecat', 'find-generic-password -s faro -a posthog',
+    ]);
+    expect(await secretExists('posthog', { platform: 'linux' })).toBe(false);
   });
 
   it('da el comando exacto para guardar un secreto', () => {

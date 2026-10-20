@@ -1,13 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ApiDeps } from './api';
-import { canChange, editableBy, type Actor, type Change } from './config-access';
+import { canChange, editableBy, type Access, type Actor, type Change } from './config-access';
 import { BadRequestError, ForbiddenError } from './errors';
-import { addSecretCommand, readSecret, type SecretName } from './keychain';
-import type { LiveConfig, OverrideKind } from './overrides';
+import { addSecretCommand, secretExists, type SecretName } from './keychain';
+import type { IgnoredOverride, LiveConfig, Origin, OverrideKind } from './overrides';
 import { nextRun } from './scheduler';
 import { NotFoundError } from './store';
-import { EFFORTS, type FaroConfig, type ProfileConfig, type ProjectConfig, type RoutineConfig } from './types';
+import { EFFORTS, type CheckConfig, type FaroConfig, type ProfileConfig, type ProjectConfig, type ReleaseConfig, type RetryWatchdogConfig, type RoutineConfig } from './types';
+import type { AsoStoreConfig } from './aso/types';
+import type { MetricsConfig } from './metrics/types';
 import { slugify } from './workspaces';
 
 type Obj = Record<string, unknown>;
@@ -71,6 +73,13 @@ const ProjectPatch = z.object({
   }).partial().strict().nullable(),
 }).partial().strict();
 
+/** Cuerpos que acepta el API (lo que manda la web). */
+export type RoutineCreateBody = z.input<typeof RoutinePost>;
+export type RoutineUpdateBody = z.input<typeof RoutinePut>;
+export type ProfileCreateBody = z.input<typeof ProfilePost>;
+export type ProfileUpdateBody = z.input<typeof ProfilePut>;
+export type ProjectUpdateBody = z.input<typeof ProjectPatch>;
+
 const wait = z.number().int().min(0).nullable();
 const GeneralPatch = z.object({
   title: text.max(80).nullable(),
@@ -78,6 +87,36 @@ const GeneralPatch = z.object({
   coordinatorProfile: text.nullable(),
   retryWatchdog: z.object({ enabled: z.boolean().nullable(), maxWaitMs: wait, maxUsageLimitWaitMs: wait }).partial().strict().nullable(),
 }).partial().strict();
+export type GeneralUpdateBody = z.input<typeof GeneralPatch>;
+
+/** Lo que devuelven `GET /api/config/full` y, para cada elemento, las rutas que lo cambian. */
+interface ElementMeta { origin: Origin; overridden: string[]; editable: Access }
+export type ConfigRoutineView = RoutineConfig & ElementMeta & { projectId: string; nextRunAt: string | null };
+export type ConfigProfileView = ProfileConfig & ElementMeta & { usedBy: string[] };
+export interface ConfigProjectView extends ElementMeta {
+  id: string; name: string; baseBranch: string;
+  github: ProjectConfig['github'] | null; backlogFile: string | null; contextWindow: number | null; metrics: MetricsConfig | null;
+  readonly: {
+    checks: CheckConfig[]; prepare: string[]; exclude: string[]; release: ReleaseConfig | null;
+    asoStores: AsoStoreConfig[]; repoPath: string; worktreesDir: string;
+  };
+  /** Conectado o falta (sin leer el valor), y el comando para añadirlo. Vacíos si el proyecto no tiene `metrics`. */
+  secrets: Record<string, boolean>;
+  secretCommands: Record<string, string>;
+}
+export interface ConfigGeneralView extends ElementMeta {
+  title: string; maxConcurrentRuns: number; coordinatorProfile: string; retryWatchdog: RetryWatchdogConfig | null;
+  readonly: { host: string; port: number; dataDir: string; allowedHosts: string[]; claudeVersion: string | null };
+}
+export type RoutineContext = NonNullable<RoutineConfig['context']>;
+export interface ConfigFull {
+  general: ConfigGeneralView;
+  projects: ConfigProjectView[];
+  profiles: ConfigProfileView[];
+  routines: ConfigRoutineView[];
+  ignored: IgnoredOverride[];
+  contexts: Record<string, RoutineContext[]>;
+}
 
 /**
  * Todos los campos de una rutina y de un perfil. Se guardan todos (los que faltan, a null): así lo guardado es
@@ -85,6 +124,10 @@ const GeneralPatch = z.object({
  */
 const ROUTINE_KEYS = ['name', 'cron', 'profileId', 'level', 'title', 'prompt', 'draft', 'release', 'context', 'maxBudgetUsd'] as const;
 const PROFILE_KEYS = ['name', 'instructions', 'model', 'effort', 'maxBudgetUsd', 'defaultLevel', 'timeoutMinutes', 'mcpConfig'] as const;
+/** Lo editable de Proyecto y Generales: también se manda entero, por la misma razón. */
+const PROJECT_KEYS = ['baseBranch', 'github', 'backlogFile', 'contextWindow', 'metrics'] as const;
+const GENERAL_KEYS = ['title', 'maxConcurrentRuns', 'coordinatorProfile', 'retryWatchdog'] as const;
+const SECRETS_TTL_MS = 60_000;
 const METRICS_SECRETS: SecretName[] = ['revenuecat', 'posthog', 'asc-key-id', 'asc-issuer', 'asc-p8'];
 
 const LABEL = { routine: 'La rutina', profile: 'El perfil' } as const;
@@ -130,7 +173,18 @@ function newId(name: string, taken: Set<string>): string {
 export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: LiveConfig }): void {
   const { live, bus } = d;
   const config = live.config;
-  const secret = d.secret ?? readSecret;
+  const exists = d.secretExists ?? secretExists;
+  // Estado de los secretos (sin leer su valor), cacheado un minuto: el panel lo pide a menudo.
+  let secretsCache: { at: number; value: Promise<Record<string, boolean>> } | null = null;
+  const secretsStatus = (): Promise<Record<string, boolean>> => {
+    if (!secretsCache || Date.now() - secretsCache.at > SECRETS_TTL_MS) {
+      const value = Promise.all(METRICS_SECRETS.map(async (n) => [n, await exists(n).catch(() => false)] as const))
+        .then((pairs) => Object.fromEntries(pairs));
+      secretsCache = { at: Date.now(), value };
+    }
+    return secretsCache.value;
+  };
+  const claudeVersion = () => d.claudeVersion?.() ?? null;
 
   const actor = (req: FastifyRequest): Actor => ({ local: req.faroLocal });
   const by = (req: FastifyRequest) => ({ deviceId: req.faroDevice?.id ?? null });
@@ -143,7 +197,7 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
   const isIgnored = (kind: OverrideKind, id: string) => live.ignored().some((i) => i.kind === kind && i.id === id);
   const ignoredIds = (kind: OverrideKind) => live.ignored().filter((i) => i.kind === kind).map((i) => i.id);
 
-  const routineView = (req: FastifyRequest, projectId: string, r: RoutineConfig, now = new Date()) => ({
+  const routineView = (req: FastifyRequest, projectId: string, r: RoutineConfig, now = new Date()): ConfigRoutineView => ({
     ...r,
     projectId,
     origin: live.origin('routine', r.id),
@@ -151,14 +205,14 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
     editable: editableBy(actor(req), 'routine', r.id, config, live.fileConfig()),
     nextRunAt: r.cron ? nextRun(r.cron, now)?.toISOString() ?? null : null,
   });
-  const profileView = (req: FastifyRequest, p: ProfileConfig) => ({
+  const profileView = (req: FastifyRequest, p: ProfileConfig): ConfigProfileView => ({
     ...p,
     origin: live.origin('profile', p.id),
     overridden: live.overriddenFields('profile', p.id),
     editable: editableBy(actor(req), 'profile', p.id, config, live.fileConfig()),
     usedBy: config.projects.flatMap((x) => (x.routines ?? []).filter((r) => r.profileId === p.id).map((r) => r.id)),
   });
-  const projectView = (req: FastifyRequest, p: ProjectConfig, secrets: Record<string, boolean>) => ({
+  const projectView = (req: FastifyRequest, p: ProjectConfig, secrets: Record<string, boolean>): ConfigProjectView => ({
     id: p.id,
     name: p.name,
     baseBranch: p.baseBranch,
@@ -177,12 +231,12 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
     overridden: live.overriddenFields('project', p.id),
     editable: editableBy(actor(req), 'project', p.id, config),
   });
-  const generalView = (req: FastifyRequest, claudeVersion: string | null) => ({
+  const generalView = (req: FastifyRequest): ConfigGeneralView => ({
     title: config.title ?? 'Faro',
     maxConcurrentRuns: config.maxConcurrentRuns,
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
     retryWatchdog: config.retryWatchdog ?? null,
-    readonly: { host: config.host, port: config.port, dataDir: config.dataDir, allowedHosts: config.allowedHosts ?? [], claudeVersion },
+    readonly: { host: config.host, port: config.port, dataDir: config.dataDir, allowedHosts: config.allowedHosts ?? [], claudeVersion: claudeVersion() },
     origin: live.origin('general', 'general'),
     overridden: live.overriddenFields('general', 'general'),
     editable: editableBy(actor(req), 'general', 'general', config),
@@ -206,19 +260,17 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
 
   const id = (req: FastifyRequest) => (req.params as { id: string }).id;
 
-  app.get('/api/config/full', async (req) => {
-    const values = await Promise.all(METRICS_SECRETS.map(async (n) => [n, (await secret(n).catch(() => null)) !== null] as const));
-    const secrets = Object.fromEntries(values);
-    const claudeVersion = (await d.claudeVersion?.().catch(() => null)) ?? null;
+  app.get('/api/config/full', async (req): Promise<ConfigFull> => {
+    const secrets = await secretsStatus();
     const now = new Date();
     return {
-      general: generalView(req, claudeVersion),
+      general: generalView(req),
       projects: config.projects.map((p) => projectView(req, p, secrets)),
       profiles: config.profiles.map((p) => profileView(req, p)),
       routines: config.projects.flatMap((p) => (p.routines ?? []).map((r) => routineView(req, p.id, r, now))),
       ignored: live.ignored(),
-      contexts: Object.fromEntries(config.projects.map((p) => [p.id, [
-        'estado', ...(p.metrics ? ['metrics'] : []), ...(p.aso ? ['aso'] : []),
+      contexts: Object.fromEntries(config.projects.map((p): [string, RoutineContext[]] => [p.id, [
+        'estado', ...(p.metrics ? ['metrics' as const] : []), ...(p.aso ? ['aso' as const] : []),
       ]])),
     };
   });
@@ -313,19 +365,21 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
     if (b.github !== undefined) value.github = mergedNested(p.github, b.github);
     if (b.metrics !== undefined) value.metrics = mergedNested(p.metrics, b.metrics);
     const before: Obj = { ...p };
-    check(req, { kind: 'project', id: p.id, before, after: merged(before, value) });
-    live.save('project', p.id, value, by(req));
+    const after = merged(before, value);
+    check(req, { kind: 'project', id: p.id, before, after });
+    live.save('project', p.id, allKeys(after, PROJECT_KEYS), by(req));
     changed();
-    return projectView(req, projectOrThrow(p.id), {});
+    return projectView(req, projectOrThrow(p.id), await secretsStatus());
   });
   app.patch('/api/config/general', async (req) => {
     const b = GeneralPatch.parse(req.body);
     const value: Obj = { ...b };
     if (b.retryWatchdog !== undefined) value.retryWatchdog = mergedNested(config.retryWatchdog, b.retryWatchdog);
     const before: Obj = { title: config.title, maxConcurrentRuns: config.maxConcurrentRuns, coordinatorProfile: config.coordinatorProfile, retryWatchdog: config.retryWatchdog };
-    check(req, { kind: 'general', id: 'general', before, after: merged(before, value) });
-    live.save('general', 'general', value, by(req));
+    const after = merged(before, value);
+    check(req, { kind: 'general', id: 'general', before, after });
+    live.save('general', 'general', allKeys(after, GENERAL_KEYS), by(req));
     changed();
-    return generalView(req, null);
+    return generalView(req);
   });
 }

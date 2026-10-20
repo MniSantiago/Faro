@@ -52,6 +52,33 @@ export function readSecret(
   });
 }
 
+/**
+ * ¿Existe el secreto? Como `readSecret` pero sin `-w`: no se descifra ni se lee el valor (el panel solo muestra
+ * conectado / falta). «No encontrado» (código 44) no se registra; otros fallos sí. Nunca lanza.
+ */
+export function secretExists(
+  name: SecretName,
+  opts: { securityBin?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {},
+): Promise<boolean> {
+  if (fromEnv.get(envSecretName(name))) return Promise.resolve(true);
+  if ((opts.platform ?? process.platform) !== 'darwin' && !opts.securityBin) return Promise.resolve(false);
+  const bin = opts.securityBin ?? '/usr/bin/security';
+  return new Promise((resolve) => {
+    execFile(
+      bin, ['find-generic-password', '-s', 'faro', '-a', name],
+      { env: opts.env ?? process.env, encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 10_000, killSignal: 'SIGKILL' },
+      (err) => {
+        if (err) {
+          const code = (err as unknown as { code?: number | string }).code;
+          if (code !== 44) console.error(`[faro] no se pudo consultar el secreto «${name}» del llavero (código ${String(code)})`);
+          return resolve(false);
+        }
+        resolve(true);
+      },
+    );
+  });
+}
+
 /** Cómo guardar un secreto: en macOS, el comando del llavero (pide el valor por teclado); en otro sistema, la variable de entorno. */
 export function addSecretCommand(name: SecretName, platform: NodeJS.Platform = process.platform): string {
   return platform === 'darwin'

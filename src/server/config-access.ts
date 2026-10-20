@@ -76,6 +76,8 @@ export function editableBy(actor: Actor, kind: OverrideKind, id: string, config:
     return null;
   };
   const before = find(config);
+  // Regla para todos: una rutina que publica en la tienda se edita en el archivo (también en el Mac).
+  if (kind === 'routine' && publishes(before)) return no('Se edita en faro.config.ts');
   // Con la config del archivo, «volver a la config» restaura esa versión: también cuenta.
   const restored = fileConfig ? find(fileConfig) : null;
   // Un elemento que no existe se trata como nuevo: sin `after` no hay nada que impida crearlo (salvo proyecto/generales).
