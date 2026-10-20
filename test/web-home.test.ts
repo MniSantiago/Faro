@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { dayLabel, deltaTone, formatDelta, niceTicks, rowFormat, sparkPath } from '../src/web/home';
+import { formatValue } from '../src/shared/format';
+import { dayLabel, deltaTone, formatDelta, formatMetric, niceTicks, rowFormat, sparkPath } from '../src/web/home';
 
 describe('sparkPath', () => {
   it('serie vacía (o solo sin datos) → sin trazo', () => {
@@ -47,6 +48,15 @@ describe('formatDelta', () => {
     expect(formatDelta(-3)).toBe('▼ 3 %');
     expect(formatDelta(0.01)).toBe('0 %');
     expect(formatDelta(null)).toBeNull();
+  });
+});
+
+describe('formatMetric', () => {
+  it('el gasto como la barra lateral; el MRR y el resto con formatValue', () => {
+    expect(formatMetric('gasto', 1.5155, 'money')).toBe('≈ 1,52 $');
+    expect(formatMetric('gasto', null, 'money')).toBe('—');
+    expect(formatMetric('mrr', 38, 'money')).toBe(formatValue(38, 'money'));
+    expect(formatMetric('descargas', 1234, 'int')).toBe(formatValue(1234, 'int'));
   });
 });
 

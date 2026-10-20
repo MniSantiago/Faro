@@ -1,5 +1,6 @@
 import type { HomeMetric } from '../server/home';
-import type { ValueFormat } from '../shared/format';
+import { formatValue, type ValueFormat } from '../shared/format';
+import { formatUsd } from './format';
 
 export const HOME_METRICS: HomeMetric[] = ['descargas', 'conversion', 'mrr', 'gasto'];
 
@@ -50,6 +51,11 @@ export function rowFormat(metric: HomeMetric, label: string): ValueFormat {
   if (metric === 'mrr') return label === 'MRR' ? 'money' : 'int';
   if (metric === 'conversion') return 'percent';
   return 'int';
+}
+
+/** Valor de una cifra o de una fila de su desglose: el gasto como en la barra lateral («≈ 1,52 $»); el resto con `formatValue`. */
+export function formatMetric(metric: HomeMetric, value: number | null, format: ValueFormat): string {
+  return metric === 'gasto' ? formatUsd(value) : formatValue(value, format);
 }
 
 /** Formato del valor de una cifra. */

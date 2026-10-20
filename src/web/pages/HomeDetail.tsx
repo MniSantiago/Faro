@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { formatValue } from '../../shared/format';
 import { api, type HomeMetric, type MetricsView, type SeriesView } from '../api';
 import { Funnel } from '../components/Funnel';
 import { LineChart } from '../components/LineChart';
-import { deltaTone, formatDelta, METRIC_FORMAT, rowFormat } from '../home';
+import { deltaTone, formatDelta, formatMetric, METRIC_FORMAT, rowFormat } from '../home';
 import { useHomeProject } from './Home';
 
 const TITLE: Record<HomeMetric, string> = { descargas: 'Descargas', conversion: 'Conversión', mrr: 'MRR', gasto: 'Gasto de Faro' };
@@ -21,12 +20,14 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
   const [series, setSeries] = useState<SeriesView | null>(null);
   const [metrics, setMetrics] = useState<MetricsView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [funnelError, setFunnelError] = useState(false);
   const hasMetrics = projects.find((p) => p.id === project)?.metrics ?? false;
 
   useEffect(() => {
     if (!project) return;
     let ignore = false;
     setSeries(null);
+    setError(null);
     api.homeSeries(project, metric, days).then((s) => { if (!ignore) { setSeries(s); setError(null); } })
       .catch((e: Error) => { if (!ignore) setError(e.message); });
     return () => { ignore = true; };
@@ -36,7 +37,8 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
   useEffect(() => {
     if (!project || metric !== 'conversion' || !hasMetrics) return;
     let ignore = false;
-    api.metrics(project).then((v) => { if (!ignore) setMetrics(v); }).catch(() => {});
+    setFunnelError(false);
+    api.metrics(project).then((v) => { if (!ignore) setMetrics(v); }).catch(() => { if (!ignore) setFunnelError(true); });
     return () => { ignore = true; };
   }, [project, metric, hasMetrics]);
 
@@ -58,7 +60,7 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
       <div className="detail-head">
         <div>
           <span className="tile-k">{currentLabel(metric, days)}</span>
-          <strong className="detail-v">{series ? formatValue(series.current, format) : '…'}</strong>
+          <strong className="detail-v">{series ? formatMetric(metric, series.current, format) : '…'}</strong>
           <span className={`tile-d ${tone}`}>{delta ? `${delta} vs semana pasada` : 'Sin referencia todavía'}</span>
         </div>
         <div className="aso-sorts" role="group" aria-label="Periodo">
@@ -84,7 +86,7 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
               <table className="aso-table">
                 <tbody>
                   {b.rows.map((r) => (
-                    <tr key={r.label}><td>{r.label}</td><td className="num">{formatValue(r.value, rowFormat(metric, r.label))}</td></tr>
+                    <tr key={r.label}><td>{r.label}</td><td className="num">{formatMetric(metric, r.value, rowFormat(metric, r.label))}</td></tr>
                   ))}
                 </tbody>
               </table>
@@ -92,6 +94,7 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
           )}
         </section>
       ))}
+      {metric === 'conversion' && funnelError && <p className="muted">No se pudo cargar el embudo</p>}
       {metric === 'conversion' && funnel && (
         <section>
           <h2>{funnel.title} (7 días)</h2>

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { formatValue } from '../../shared/format';
 import { api, subscribe, type ConfigView, type HomeView } from '../api';
 import { Sparkline } from '../components/Sparkline';
-import { deltaTone, formatDelta, loadHomeProject, saveHomeProject } from '../home';
+import { deltaTone, formatDelta, formatMetric, loadHomeProject, saveHomeProject } from '../home';
 import type { HomeTile, HealthLine } from '../../server/home';
 
 /** Proyectos y proyecto elegido en la home (recordado en el navegador; si ya no existe, el primero). */
@@ -42,7 +41,7 @@ function Tile({ t }: { t: HomeTile }) {
     <a className="tile" href={`#/inicio/${t.metric}`}>
       <span className="tile-go" aria-hidden="true">↗</span>
       <span className="tile-k">{t.label}</span>
-      <span className="tile-v">{formatValue(t.value, t.format)}</span>
+      <span className="tile-v">{formatMetric(t.metric, t.value, t.format)}</span>
       <span className={`tile-d ${tone}`}>{delta ? `${delta} vs semana pasada` : 'Sin referencia todavía'}</span>
       <Sparkline values={t.spark} tone={tone} />
       {t.metric === 'gasto' && <span className="tile-note">equivalente API</span>}
@@ -61,14 +60,21 @@ export function Home() {
     if (!project) return;
     let ignore = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let seq = 0;
     setView(null);
     const load = () => {
-      api.home(project).then((v) => { if (!ignore) { setView(v); setError(null); } }).catch((e: Error) => { if (!ignore) setError(e.message); });
+      timer = undefined;
+      // Solo cuenta la respuesta de la última petición: una más lenta y antigua no pisa a la nueva.
+      const n = ++seq;
+      api.home(project)
+        .then((v) => { if (!ignore && n === seq) { setView(v); setError(null); } })
+        .catch((e: Error) => { if (!ignore && n === seq) setError(e.message); });
     };
-    // Cuando cambia una tarea cambian el titular, la semana y el gasto: se vuelve a pedir, agrupando avisos seguidos.
-    const loadSoon = () => { clearTimeout(timer); timer = setTimeout(load, 1000); };
+    // Cuando cambia una tarea cambian el titular, la semana y el gasto: como mucho una petición por segundo, aunque los
+    // avisos no paren (con agentes trabajando llegan seguidos y un temporizador que se reinicia no llegaría a saltar).
+    const loadSoon = () => { if (timer === undefined) timer = setTimeout(load, 1000); };
+    // La carga inicial la hace `onOpen` (también si la conexión SSE ya estaba abierta) y se repite al reconectar.
     const off = subscribe((m) => { if (m.type === 'task') loadSoon(); }, load);
-    load();
     return () => { ignore = true; off(); clearTimeout(timer); };
   }, [project]);
 
