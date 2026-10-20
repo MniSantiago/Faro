@@ -90,6 +90,7 @@ function roundedBackground(x: number, y: number): boolean {
 /** Capas del dibujo de abajo arriba: color y alfa en un punto, o null si no pinta. */
 interface Opts { fullBleed?: boolean; scale?: number }
 
+// La misma geometría vive en src/web/components/Logo.tsx y src/web/public/favicon.svg: mantener los tres a la par.
 // Logo «haz de luz» (viewBox 48×48 de Logo.tsx). `FILL` es la fracción del icono que ocupa ese cuadro.
 const FILL = 0.8;
 const CENTER: [number, number] = [27, 23.75]; // centro del dibujo dentro del cuadro 48×48
