@@ -2,12 +2,14 @@
   --bg: #faf7f2; --fg: #1b2236; --muted: #7a7366; --line: #e8e1d4; --card: #fff;
   --accent: #f2a93b; --accent-text: #8a5a14; --on-accent: #1b2236; --ok: #3b7a8c; --bad: #c2472f; --add: #dcefe9; --del: #f8e1db;
   --chip-line: color-mix(in srgb, var(--fg) 16%, var(--card));
+  /* Titular de la home: azul noche con texto claro en los dos modos. */
+  --hero-bg: #1b2236; --hero-fg: #f4ede1;
   color-scheme: light;
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #121a2b; --fg: #f4ede1; --muted: #a39b8c; --line: #2a3550; --card: #1b2438;
-    --accent: #f6b955; --accent-text: #f6b955; --on-accent: #1b2236; --ok: #6fb3c4; --bad: #e8826b; --add: #1c4a45; --del: #5a2a26; color-scheme: dark; }
+    --accent: #f6b955; --accent-text: #f6b955; --on-accent: #1b2236; --ok: #6fb3c4; --bad: #e8826b; --add: #1c4a45; --del: #5a2a26; --hero-bg: #0b1120; color-scheme: dark; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); }
@@ -238,6 +240,59 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 .cards .card .row .dot { align-self: center; }
 .mobile-only { display: none; }
 
+/* Home: titular, 4 cifras, salud y semana (maqueta «home-mix»). */
+.home { display: grid; gap: 12px; }
+.home-project { display: flex; gap: 8px; align-items: center; justify-self: start; font-size: 14px; }
+.home-project select { width: auto; }
+.hero { display: flex; gap: 14px; align-items: center; padding: 16px 18px; border-radius: 12px; background: var(--hero-bg); color: var(--hero-fg); border: 1px solid var(--hero-bg); }
+@media (prefers-color-scheme: dark) { .hero { border-color: var(--line); } }
+.hero-text { flex: 1; min-width: 0; }
+.hero h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.hero p { margin: 2px 0 0; font-size: 13px; opacity: .75; }
+/* Sobre el azul noche, el ámbar claro (el de los rellenos) es el que se lee. */
+.hero-go { font-size: 13px; padding: 5px 12px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); text-decoration: none; white-space: nowrap; }
+.hero-go:hover { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.hero-link { font-size: 13px; color: var(--hero-fg); opacity: .75; white-space: nowrap; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tile { position: relative; display: grid; gap: 2px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: inherit; text-decoration: none; transition: border-color .15s, box-shadow .15s; min-width: 0; }
+.tile:hover, .tile:focus-visible { border-color: var(--accent); box-shadow: 0 2px 10px rgb(27 34 54 / .08); }
+.tile-go { position: absolute; right: 12px; top: 10px; color: var(--muted); opacity: 0; transition: opacity .15s; }
+.tile:hover .tile-go, .tile:focus-visible .tile-go { opacity: 1; color: var(--accent-text); }
+.tile-k { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding-right: 14px; }
+.tile-v { font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tile.off .tile-v { font-size: 16px; font-weight: 600; padding: 4px 0; }
+.tile-d { display: block; font-size: 11px; color: var(--muted); }
+.tile-d.ok { color: var(--ok); } .tile-d.bad { color: var(--bad); } .tile-d.accent { color: var(--accent-text); }
+.tile-note { font-size: 11px; color: var(--muted); opacity: .75; }
+.tile-spark { display: block; width: 100%; height: 22px; margin-top: 4px; }
+.tile-spark path { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tile-spark.ok path { stroke: var(--ok); } .tile-spark.bad path { stroke: var(--bad); }
+.home-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.home-block h2 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.home-block ul { list-style: none; padding: 0; margin: 0; }
+.home-block li { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.home-block li:last-child { border-bottom: 0; }
+.hl-label { display: flex; align-items: center; flex: none; }
+.hl-detail { color: var(--muted); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.hl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; flex: none; background: var(--accent); }
+.hl-dot.ok { background: var(--ok); } .hl-dot.bad { background: var(--bad); }
+
+/* Detalle de una cifra. */
+.home-detail .page-head { margin: 8px 0 12px; }
+.detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 12px; }
+.detail-v { display: block; font-size: 32px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.detail-note { margin: 0 0 8px; font-size: 14px; }
+.chart { min-width: 0; }
+.chart svg { display: block; touch-action: pan-y; user-select: none; }
+.chart-empty { padding: 48px 0; text-align: center; }
+.chart .grid { stroke: var(--line); }
+.chart .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chart .hover line { stroke: var(--muted); stroke-dasharray: 3 3; }
+.chart .hover circle { fill: var(--card); stroke: var(--accent-text); stroke-width: 2; }
+.chart-readout { margin: 6px 0 0; font-size: 14px; min-height: 1.5em; }
+.aso-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
 @media (min-width: 768px) {
   /* Sin relleno inferior en .app: si no, la barra lateral fija se despega del borde al llegar al final. */
   .app { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0 32px; align-items: start; padding-bottom: 0; }
@@ -289,6 +344,11 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .plus-menu a { padding: 10px 12px; border-radius: 8px; text-decoration: none; font-size: 15px; }
   .plus-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   .plus-menu a:hover, .plus-menu a:focus-visible { background: var(--bg); }
+  /* Home: cifras 2×2 y bloques apilados. */
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-two { grid-template-columns: minmax(0, 1fr); }
+  .hero { flex-wrap: wrap; }
+  .tile-v { font-size: 20px; }
   /* El compositor de la tarea queda encima de la barra inferior. */
   .composer { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { HomeMetric } from '../server/home';
 import type { QueueState } from '../server/types';
 import { api, authState, subscribe } from './api';
 import { Nav } from './components/Nav';
@@ -8,7 +9,9 @@ import { Chats } from './pages/Chats';
 import { Devices } from './pages/Devices';
 import { Config } from './pages/Config';
 import { History } from './pages/History';
+import { HOME_METRICS } from './home';
 import { Home } from './pages/Home';
+import { HomeDetail } from './pages/HomeDetail';
 import { Inbox } from './pages/Inbox';
 import { Metrics } from './pages/Metrics';
 import { Login } from './pages/Login';
@@ -17,6 +20,12 @@ import { NewTask } from './pages/NewTask';
 import { Routines } from './pages/Routines';
 import { Plan } from './pages/Plan';
 import { TaskPage } from './pages/TaskPage';
+
+/** Cifra de `#/inicio/<cifra>`, o null si la ruta no es un detalle conocido (entonces se pinta la home). */
+const detailMetric = (route: string): HomeMetric | null => {
+  const m = route.startsWith('/inicio/') ? route.slice('/inicio/'.length) : '';
+  return (HOME_METRICS as string[]).includes(m) ? (m as HomeMetric) : null;
+};
 
 function useRoute(): string {
   const [route, setRoute] = useState(location.hash.slice(1) || '/');
@@ -72,6 +81,7 @@ function Shell() {
             : route === '/historial' ? <History />
             : route === '/bandeja' ? <Inbox />
             : route === '/config' || route.startsWith('/config/') ? <Config />
+            : detailMetric(route) ? <HomeDetail key={route} metric={detailMetric(route)!} />
             : <Home />}
         </main>
       </div>

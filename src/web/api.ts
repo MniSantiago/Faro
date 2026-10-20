@@ -1,11 +1,12 @@
 import type { BacklogItem } from '../server/backlog';
+import type { HomeMetric, HomeView, SeriesView } from '../server/home';
 import type { Card } from '../server/metrics/summary';
 import type { Snapshot, SourceId } from '../server/metrics/types';
 import type { KeywordRow } from './aso';
 import type { PlanState } from '../server/plan';
 import type { Approval, Artifact, BusMessage, Comment, Device, EventRow, Job, Level, QueueState, Release, Run, Spend, Task, TaskStats } from '../server/types';
 
-export type { BacklogItem, PlanState };
+export type { BacklogItem, HomeMetric, HomeView, PlanState, SeriesView };
 
 export interface ConfigView {
   projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean }[];
@@ -81,6 +82,9 @@ export const api = {
   asoDecide: (id: number, decision: 'accepted' | 'rejected') => req<unknown>('POST', `/api/aso/proposals/${id}`, { decision }),
   asoAcceptAll: (project: string, store: string) => req<{ ok: true; accepted: number }>('POST', '/api/aso/proposals/accept-all', { project, store }),
   asoRefresh: () => req<{ ok: boolean }>('POST', '/api/aso/refresh'),
+  home: (project: string) => req<HomeView>('GET', `/api/home?project=${encodeURIComponent(project)}`),
+  homeSeries: (project: string, metric: HomeMetric, days: 7 | 30 | 90) =>
+    req<SeriesView>('GET', `/api/home/series?project=${encodeURIComponent(project)}&metric=${metric}&days=${days}`),
   metrics: (project: string) => req<MetricsView>('GET', `/api/metrics?project=${encodeURIComponent(project)}`),
   refreshMetrics: () => req<{ ok: boolean }>('POST', '/api/metrics/refresh'),
   config: () => req<ConfigView>('GET', '/api/config'),
