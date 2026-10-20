@@ -111,16 +111,19 @@ function useNavConfig() {
   const [cfg, setCfg] = useState<ConfigView | null>(null);
   useEffect(() => {
     let ignore = false;
+    let seq = 0;
     const load = () => {
+      const mine = ++seq;
       api.config().then((c) => {
-        if (ignore) return;
+        // Una respuesta vieja que llega después de otra más nueva se descarta.
+        if (ignore || mine !== seq) return;
         setCfg(c);
         document.title = c.title;
       }).catch(() => {});
     };
-    load();
     // El panel de configuración emite `config` al guardar: el título y las secciones se ponen al día sin recargar.
-    const off = subscribe((m) => { if (m.type === 'config') load(); });
+    const off = subscribe((m) => { if (m.type === 'config') load(); }, load);
+    load();
     return () => { ignore = true; off(); };
   }, []);
   return {

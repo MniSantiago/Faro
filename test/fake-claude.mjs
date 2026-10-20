@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 
 const env = process.env;
+// Lo primero: las pruebas de timeout matan el proceso pronto y aun así necesitan saber dónde corrió.
+if (env.FAKE_CWD_OUT) fs.appendFileSync(env.FAKE_CWD_OUT, process.cwd() + '\n');
 const list = (env.FAKE_FIXTURES ?? '').split(',').filter(Boolean);
 let n = 0;
 if (env.FAKE_COUNTER) {
@@ -10,7 +12,6 @@ if (env.FAKE_COUNTER) {
   fs.writeFileSync(env.FAKE_COUNTER, String(n + 1));
 }
 if (env.FAKE_ENV_OUT) fs.appendFileSync(env.FAKE_ENV_OUT, JSON.stringify({ GIT_CONFIG_KEY_0: process.env.GIT_CONFIG_KEY_0 ?? null, GH_TOKEN: process.env.GH_TOKEN ?? null }) + '\n');
-if (env.FAKE_CWD_OUT) fs.appendFileSync(env.FAKE_CWD_OUT, process.cwd() + '\n');
 if (env.FAKE_ARGS_OUT) fs.appendFileSync(env.FAKE_ARGS_OUT, JSON.stringify(process.argv.slice(2)) + '\n');
 
 let stdin = '';

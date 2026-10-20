@@ -65,7 +65,7 @@ describe('asistente de rutinas', () => {
 
   it('CLI colgada: «El asistente tardó demasiado» y no deja carpeta temporal', async () => {
     const { call, cwd } = setup(valido, { FAKE_HANG: '1' });
-    await expect(call({ timeoutMs: 200 })).rejects.toThrow('El asistente tardó demasiado');
+    await expect(call({ timeoutMs: 1500 })).rejects.toThrow('El asistente tardó demasiado');
     const used = readFileSync(cwd, 'utf8').trim();
     expect(used).toContain('faro-asistente-');
     expect(existsSync(used)).toBe(false);

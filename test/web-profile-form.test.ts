@@ -44,6 +44,13 @@ describe('formulario de proyecto', () => {
       },
     });
   });
+  it('la ventana de contexto solo admite dígitos', () => {
+    const f = formFromProject({ baseBranch: 'main', github: null, backlogFile: null, contextWindow: null, metrics: null });
+    for (const bad of ['200.000', '1e5', '2.0', '-5', '0x10']) {
+      expect(projectToBody({ ...f, contextWindow: bad })).toEqual({ ok: false, error: 'La ventana de contexto debe ser un entero mayor que 0' });
+    }
+    expect(projectToBody({ ...f, contextWindow: ' 200000 ' })).toMatchObject({ ok: true, body: { contextWindow: 200000 } });
+  });
   it('sin github ni metrics manda null; valida la ventana y el embudo', () => {
     const f = formFromProject({ baseBranch: 'main', github: null, backlogFile: null, contextWindow: null, metrics: null });
     expect(projectToBody(f)).toMatchObject({ ok: true, body: { github: null, metrics: null, contextWindow: null } });
@@ -63,6 +70,13 @@ describe('formulario de generales', () => {
       ok: true,
       body: { title: 'Faro', maxConcurrentRuns: 2, coordinatorProfile: 'coordinador', retryWatchdog: { enabled: false, maxWaitMs: 90000, maxUsageLimitWaitMs: null } },
     });
+  });
+  it('1000 ms se muestra redondeado pero sin tocar se manda exacto; editado, lo nuevo', () => {
+    const f = formFromGeneral({ title: 'Faro', maxConcurrentRuns: 1, coordinatorProfile: 'c', retryWatchdog: { maxWaitMs: 1000, maxUsageLimitWaitMs: 7 } });
+    expect(f.maxWait).toBe('0,017');
+    expect(generalToBody(f)).toMatchObject({ ok: true, body: { retryWatchdog: { maxWaitMs: 1000, maxUsageLimitWaitMs: 7 } } });
+    expect(generalToBody({ ...f, maxWait: '2' })).toMatchObject({ ok: true, body: { retryWatchdog: { maxWaitMs: 120000 } } });
+    expect(generalToBody({ ...f, maxConcurrent: '1.5' })).toMatchObject({ ok: false });
   });
   it('sin vigilancia manda null y valida los números', () => {
     const f = formFromGeneral({ title: 'Faro', maxConcurrentRuns: 1, coordinatorProfile: 'c', retryWatchdog: null });

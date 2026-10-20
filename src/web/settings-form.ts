@@ -8,7 +8,8 @@ export type Tri = 'default' | 'on' | 'off';
 const triOf = (v: boolean | null | undefined): Tri => (v == null ? 'default' : v ? 'on' : 'off');
 const boolOf = (t: Tri): boolean | null => (t === 'default' ? null : t === 'on');
 const orNull = (s: string) => s.trim() || null;
-const intOrNull = (s: string) => { const n = Number(s.trim()); return Number.isInteger(n) && n > 0 ? n : null; };
+/** Solo dígitos (rechaza «200.000», «1e5», «2.0»), y mayor que 0. */
+const intOrNull = (s: string) => { const t = s.trim(); const n = Number(t); return /^\d+$/.test(t) && Number.isSafeInteger(n) && n > 0 ? n : null; };
 
 // --- Proyecto ---
 
@@ -65,10 +66,12 @@ export function projectSame(a: ProjectFormState, b: ProjectFormState): boolean {
 
 export interface GeneralFormState {
   title: string; maxConcurrent: string; coordinatorProfile: string; enabled: Tri; maxWait: string; maxUsageWait: string;
+  /** Los ms originales: si el texto mostrado (redondeado) no se toca, se manda el valor exacto. */
+  waitMs?: number; usageWaitMs?: number;
 }
 type GeneralFields = Pick<ConfigGeneralView, 'title' | 'maxConcurrentRuns' | 'coordinatorProfile' | 'retryWatchdog'>;
 
-const minutes = (ms: number | undefined) => (ms == null ? '' : String(ms / 60000).replace('.', ','));
+const minutes = (ms: number | undefined) => (ms == null ? '' : String(Math.round((ms / 60000) * 1000) / 1000).replace('.', ','));
 /** Minutos (admite coma) → ms; null si no es un número de 0 en adelante. */
 const toMs = (s: string): number | null => {
   const n = Number(s.trim().replace(',', '.'));
@@ -80,6 +83,7 @@ export function formFromGeneral(g: GeneralFields): GeneralFormState {
   return {
     title: g.title, maxConcurrent: String(g.maxConcurrentRuns), coordinatorProfile: g.coordinatorProfile,
     enabled: triOf(w?.enabled), maxWait: minutes(w?.maxWaitMs), maxUsageWait: minutes(w?.maxUsageLimitWaitMs),
+    waitMs: w?.maxWaitMs, usageWaitMs: w?.maxUsageLimitWaitMs,
   };
 }
 
@@ -88,8 +92,8 @@ export function generalToBody(f: GeneralFormState): { ok: true; body: Required<G
   if (maxConcurrentRuns === null) return { ok: false, error: 'Las ejecuciones simultáneas deben ser un entero mayor que 0' };
   let maxWaitMs: number | null = null;
   let maxUsageLimitWaitMs: number | null = null;
-  if (f.maxWait.trim() && (maxWaitMs = toMs(f.maxWait)) === null) return { ok: false, error: 'La espera máxima debe ser un número de minutos (0 o más)' };
-  if (f.maxUsageWait.trim() && (maxUsageLimitWaitMs = toMs(f.maxUsageWait)) === null) return { ok: false, error: 'La espera por límite de uso debe ser un número de minutos (0 o más)' };
+  if (f.maxWait.trim() && (maxWaitMs = f.maxWait.trim() === minutes(f.waitMs) ? f.waitMs ?? null : toMs(f.maxWait)) === null) return { ok: false, error: 'La espera máxima debe ser un número de minutos (0 o más)' };
+  if (f.maxUsageWait.trim() && (maxUsageLimitWaitMs = f.maxUsageWait.trim() === minutes(f.usageWaitMs) ? f.usageWaitMs ?? null : toMs(f.maxUsageWait)) === null) return { ok: false, error: 'La espera por límite de uso debe ser un número de minutos (0 o más)' };
   const enabled = boolOf(f.enabled);
   return {
     ok: true,

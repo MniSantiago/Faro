@@ -99,7 +99,7 @@ export function ProfileForm({ profile, local, onDirty, onSaved }: Props) {
                 disabled={!local && l > 2} onClick={() => set('level', l)}>{LEVEL_LABEL[l]}</button>
             ))}
           </div>
-          {!local && <span className="hint">Desde un dispositivo vinculado solo se puede elegir hasta el nivel 2.</span>}
+          {!local && <span className="hint muted">Desde un dispositivo vinculado solo se puede elegir hasta el nivel 2.</span>}
         </div>
 
         <div className="r2">
