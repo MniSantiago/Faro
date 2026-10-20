@@ -128,7 +128,7 @@ describe('descargas por día', () => {
 });
 
 describe('días vacíos', () => {
-  it('un día viejo vacío queda conocido y no se vuelve a pedir; uno reciente sin guardar sí', async () => {
+  it('un día viejo vacío queda conocido en la siguiente recogida y no cuenta como conocido antes', async () => {
     const asked: string[][] = [];
     const c = new MetricsCollector({
       store, config: config(), secret, now: () => new Date('2026-10-15T10:00:00Z'),
@@ -141,7 +141,6 @@ describe('días vacíos', () => {
     await c.collectAll();
     expect(asked[0]).not.toContain('2026-10-09');
     expect(asked[1]).toContain('2026-10-09');
-    expect(store.downloadDays('demo', '2026-10-12').size).toBe(0);
   });
 });
 

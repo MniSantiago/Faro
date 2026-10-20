@@ -106,7 +106,8 @@ export const appstoreSource: MetricSource = {
               const rows = unitsByCountry(gunzipSync(Buffer.from(await r.arrayBuffer())).toString('utf8'), appId);
               if (rows === null) { notes.push('Descargas: el informe de ventas no trae la columna Apple Identifier'); break; }
               byDay.push({ day, rows });
-              mostRecent ??= rows.reduce((t, x) => t + x.units, 0);
+              // Solo el día más reciente alimenta `downloads`: si falla, queda null y no se pasa por actual un día de relleno.
+              if (day === latest) mostRecent = rows.reduce((t, x) => t + x.units, 0);
             } catch (e) {
               // Un día que falla (p. ej. 404 de uno antiguo) no anula los demás; la nota solo recoge el primer fallo.
               const n = `Descargas: ${e instanceof Error && e.message.startsWith('respondió') ? `App Store Connect ${e.message}` : 'informe de ventas no disponible'}`;

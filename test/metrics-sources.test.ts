@@ -177,6 +177,14 @@ describe('App Store', () => {
     expect(String(r.data?.notes)).toContain('404');
   });
 
+  it('si falla el día más reciente, downloads queda null aunque un día de relleno responda', async () => {
+    const sales = (call: Call) => (call.url.includes('[reportDate]=2026-10-13') ? json('{}', 404) : new Response(report, { status: 200 }));
+    const { c } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, (call) => (call.url.includes('/salesReports') ? sales(call) : routes()(call)));
+    const r = await appstoreSource.collect(c);
+    expect(r.data?.downloads).toBeNull();
+    expect((r.data?.downloads_by_day as unknown[]).length).toBe(5);
+  });
+
   it('un 404 de un día de 4 o más días se devuelve como día vacío; 5xx no se guarda', async () => {
     const sales = (call: Call) => (call.url.includes('[reportDate]=2026-10-11') ? json('{}', 404) : call.url.includes('[reportDate]=2026-10-10') ? json('{}', 500) : new Response(report, { status: 200 }));
     const { c } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, (call) => (call.url.includes('/salesReports') ? sales(call) : routes()(call)));

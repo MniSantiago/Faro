@@ -55,7 +55,7 @@ export class MetricsCollector {
       timer = setTimeout(() => { ctrl.abort(); reject(new Error('Tiempo agotado')); }, this.d.timeoutMs ?? 30_000);
     });
     try {
-      const knownDownloadDays = this.d.store.downloadDays(projectId, new Date(at.getTime() - 91 * 86_400_000).toISOString().slice(0, 10));
+      const knownDownloadDays = this.d.store.downloadDays(projectId, new Date(at.getTime() - 95 * 86_400_000).toISOString().slice(0, 10));
       const res = await Promise.race([source.collect({ config, secret, fetch: f, now: at, knownDownloadDays }), timeout]);
       this.configured.set(`${projectId}:${source.id}`, res.configured);
       if (res.configured) {
