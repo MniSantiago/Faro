@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Spend, Task } from '../../server/types';
-import { api, mergeTasks, subscribe } from '../api';
+import { api, mergeTasks, subscribe, type ConfigView } from '../api';
 import { loadSeen, navSection, SEEN_EVENT, SEEN_KEY, seedSeenIfMissing, unreadChats, type NavSection } from '../chats';
 import { formatUsd } from '../format';
 import { inboxSections } from '../inbox';
@@ -98,9 +98,29 @@ function PlusMenu({ route }: { route: string }) {
   );
 }
 
+/** Lo que la navegación necesita de la config: nombre del panel y qué secciones opcionales tiene algún proyecto. */
+function useNavConfig() {
+  const [cfg, setCfg] = useState<ConfigView | null>(null);
+  useEffect(() => {
+    let ignore = false;
+    api.config().then((c) => {
+      if (ignore) return;
+      setCfg(c);
+      document.title = c.title;
+    }).catch(() => {});
+    return () => { ignore = true; };
+  }, []);
+  return {
+    title: cfg?.title ?? 'Faro',
+    metrics: cfg?.projects.some((p) => p.metrics) ?? false,
+    aso: cfg?.projects.some((p) => p.aso) ?? false,
+  };
+}
+
 /** Navegación fija: barra lateral en pantallas anchas y barra inferior con «+» en el móvil (< 768 px). */
 export function Nav({ route }: { route: string }) {
   const { tasks, spend, seen } = useNavData();
+  const show = useNavConfig();
   const need = inboxSections(tasks, new Date()).need.length;
   const unread = unreadChats(tasks, seen).length > 0;
   const active = navSection(route, tasks);
@@ -111,13 +131,13 @@ export function Nav({ route }: { route: string }) {
   return (
     <>
       <nav className="sidebar" aria-label="Navegación">
-        <a href="#/" className="brand">Faro</a>
+        <a href="#/" className="brand">{show.title}</a>
         <a href="#/" aria-current={cur('bandeja')}><Icon name="bandeja" /><span className="label">Bandeja</span>{badge}</a>
         <a href="#/chats" aria-current={cur('chats')}><Icon name="chats" /><span className="label">Chats</span>{dot}</a>
         <a href="#/plan" aria-current={cur('plan')}><Icon name="plan" /><span className="label">Plan</span></a>
         <a href="#/rutinas" aria-current={cur('rutinas')}><Icon name="rutinas" /><span className="label">Rutinas</span></a>
-        <a href="#/metricas" aria-current={cur('metricas')}><Icon name="metricas" /><span className="label">Métricas</span></a>
-        <a href="#/aso" aria-current={cur('aso')}><Icon name="aso" /><span className="label">ASO</span></a>
+        {show.metrics && <a href="#/metricas" aria-current={cur('metricas')}><Icon name="metricas" /><span className="label">Métricas</span></a>}
+        {show.aso && <a href="#/aso" aria-current={cur('aso')}><Icon name="aso" /><span className="label">ASO</span></a>}
         <a href="#/dispositivos" aria-current={cur('dispositivos')}><Icon name="dispositivos" /><span className="label">Dispositivos</span></a>
         <div className="side-actions">
           <a href="#/nueva" className="btn primary">Nueva tarea</a>
@@ -131,7 +151,9 @@ export function Nav({ route }: { route: string }) {
         <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
         <PlusMenu route={route} />
         <a href="#/rutinas" aria-current={cur('rutinas')}><span className="ico-wrap"><Icon name="rutinas" /></span>Rutinas</a>
-        <a href="#/metricas" aria-current={cur('metricas')}><span className="ico-wrap"><Icon name="metricas" /></span>Métricas</a>
+        {show.metrics
+          ? <a href="#/metricas" aria-current={cur('metricas')}><span className="ico-wrap"><Icon name="metricas" /></span>Métricas</a>
+          : <a href="#/dispositivos" aria-current={cur('dispositivos')}><span className="ico-wrap"><Icon name="dispositivos" /></span>Dispositivos</a>}
       </nav>
     </>
   );

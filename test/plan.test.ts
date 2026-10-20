@@ -52,9 +52,9 @@ describe('Backlog compartido con el plugin pendientes', () => {
 });
 
 describe('unshipped', () => {
-  it('agrupa por tarea lo integrado desde el commit del build y marca lo que toca app/', async () => {
+  it('agrupa por tarea lo integrado desde el commit del build y marca lo que toca la carpeta de release.cwd', async () => {
     const repo = makeRepo();
-    const project = makeConfig(repo).projects[0];
+    const project = { ...makeConfig(repo).projects[0], release: { cwd: 'app', build: 'b', submit: 's' } };
     const build = gitSync(repo, 'rev-parse', 'HEAD').trim();
     const commit = (file: string, msg: string) => {
       const full = path.join(repo, file);
@@ -82,6 +82,9 @@ describe('unshipped', () => {
     ]);
     expect(list[0].title).toBe('Pantalla nueva');
     expect(list[2].title).toBe('Landing nueva');
+    // Con release.cwd «.», todo el repo es la app.
+    const whole = await unshipped({ ...project, release: { cwd: '.', build: 'b', submit: 's' } }, build, { findTask: (id) => tasks[id] ?? null });
+    expect(whole.every((u) => u.touchesApp)).toBe(true);
   });
 });
 

@@ -107,7 +107,7 @@ describe.skipIf(process.platform !== 'darwin')('sandbox de agentes (macOS)', () 
   it('las comprobaciones corren bajo el mismo sandbox', async () => {
     const s = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' }, true);
     const hook = path.join(s.repo, '.git', 'hooks', 'desde-check');
-    s.project.checks.push({ name: 'Escribe hook', command: `echo x > '${hook}'` });
+    s.project.checks!.push({ name: 'Escribe hook', command: `echo x > '${hook}'` });
     const t = await s.run();
     expect(t.state).toBe('review');
     expect(existsSync(hook)).toBe(false);

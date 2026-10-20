@@ -45,11 +45,14 @@ export interface ProjectConfig {
   baseBranch: string;
   remote: string;
   worktreesDir: string;
-  startNumber: number;
-  prepare: string[];
+  /** Número de la primera tarea (por defecto 1). */
+  startNumber?: number;
+  /** Comandos que se ejecutan en cada worktree nuevo antes de lanzar al agente. */
+  prepare?: string[];
   /** Patrones que Faro añade a `.git/info/exclude` (además de `.faro/`), p. ej. enlaces creados por `prepare`. */
   exclude?: string[];
-  checks: CheckConfig[];
+  /** Comprobaciones que tiene que pasar una tarea antes de revisión. */
+  checks?: CheckConfig[];
   /** Rutinas programadas del proyecto (fase 2). */
   routines?: RoutineConfig[];
   /** Comandos de build y envío que ejecuta Faro tras integrar (fase 2). */
@@ -91,6 +94,8 @@ export interface FaroConfig {
   maxConcurrentRuns: number;
   /** Lanza agentes y comprobaciones dentro de `sandbox-exec` en macOS (por defecto, sí). */
   sandbox?: boolean;
+  /** Nombre del panel en la web (por defecto «Faro»). */
+  title?: string;
   /** Perfil de las conversaciones y de dividir objetivos en subtareas (por defecto `coordinador`). */
   coordinatorProfile?: string;
   projects: ProjectConfig[];

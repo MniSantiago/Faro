@@ -32,6 +32,9 @@ export async function unshipped(project: ProjectConfig, commit: string, store: P
   if (r.code !== 0) throw new Error(`No se pudo leer git desde ${commit.slice(0, 9)}: ${r.stderr.trim()}`);
   const byKey = new Map<string, Unshipped>();
   const re = new RegExp(`^(${project.prefix}-\\d+):\\s*(.*)$`);
+  // La app es la carpeta de release.cwd; con «.» (o sin release) todo el repo es la app.
+  const cwd = project.release?.cwd.replace(/^\.\/?/, '').replace(/\/+$/, '') ?? '';
+  const appDir = cwd ? `${cwd}/` : '';
   for (const rec of r.stdout.split('\x1e').slice(1)) {
     const [head, ...files] = rec.trim().split('\n');
     const [subject, at] = head.split('\x1f');
@@ -40,7 +43,7 @@ export async function unshipped(project: ProjectConfig, commit: string, store: P
     const found = m ? store.findTask(m[1]) : null;
     const task = found && isConflictTask(store, found) ? store.findTask(found.parentId!) : found;
     const key = task?.id ?? (m ? m[1] : `commit:${subject}:${at}`);
-    const touchesApp = files.some((f) => f.startsWith('app/'));
+    const touchesApp = files.some((f) => f !== '' && f.startsWith(appDir));
     const cur = byKey.get(key);
     if (cur) {
       cur.commits += 1;

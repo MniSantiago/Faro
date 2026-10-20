@@ -38,7 +38,7 @@ async function inReview(env: Record<string, string> = DONE) {
 describe('ReviewActions', () => {
   it('parar durante las comprobaciones corta el check, bloquea y no integra', async () => {
     const s = setup(DONE);
-    s.config.projects[0].checks.push({ name: 'Lento', command: 'sleep 30' });
+    s.config.projects[0].checks!.push({ name: 'Lento', command: 'sleep 30' });
     const t = s.actions.createTask({ ...input, level: 3 });
     // La ejecución del agente terminó y Faro está en las comprobaciones.
     // Espera a que las comprobaciones estén de verdad en curso (commit y diff pueden tardar bajo carga).
@@ -334,7 +334,7 @@ describe('ReviewActions · message', () => {
 
   it('interrumpir durante las comprobaciones no pierde el mensaje', async () => {
     const s = setup(DONE);
-    s.config.projects[0].checks.push({ name: 'Corto', command: 'sleep 1' });
+    s.config.projects[0].checks!.push({ name: 'Corto', command: 'sleep 1' });
     const t = s.actions.createTask(input);
     await until(() => s.store.listRuns(t.id)[0]?.endedAt != null);
     s.actions.message(t.id, 'una cosa más', { interrupt: true });
@@ -472,7 +472,7 @@ describe('ReviewActions · revisión final de la fase 2', () => {
     const s = setupWs(DONE, (base) => ({
       merge: async (p, t) => { await sleep(400); return base.merge(p, t); },
     }));
-    s.config.projects[0].checks.push({ name: 'tests', command: 'true' });
+    s.config.projects[0].checks!.push({ name: 'tests', command: 'true' });
     const t = s.actions.createTask({ ...input, level: 3 });
     await until(() => isIntegrating(t.id));
     expect(() => s.actions.message(t.id, 'espera')).toThrow(ActionError);
@@ -534,7 +534,7 @@ describe('ReviewActions · revisión final de la fase 2', () => {
     const mark = path.join(dir, 'mark');
     const s = setupWs(DONE, () => ({}));
     // La primera vez la comprobación tarda 30 s; las siguientes, nada.
-    s.config.projects[0].checks.push({ name: 'Lenta', command: `if [ -f '${mark}' ]; then exit 0; fi; touch '${mark}'; sleep 30` });
+    s.config.projects[0].checks!.push({ name: 'Lenta', command: `if [ -f '${mark}' ]; then exit 0; fi; touch '${mark}'; sleep 30` });
     const states: string[] = [];
     s.bus.subscribe((m) => { if (m.type === 'task') states.push(m.task.state); });
     const t = s.actions.createTask(input);

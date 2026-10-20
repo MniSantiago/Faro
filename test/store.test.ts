@@ -54,6 +54,12 @@ describe('tareas', () => {
     expect(store.runSawInit(b.id)).toBe(false);
   });
 
+  it('sin startNumber, prepare ni checks numera desde 1', () => {
+    const s = new Store(':memory:');
+    const { startNumber: _n, prepare: _p, checks: _c, ...bare } = project;
+    expect(s.createTask({ ...bare, id: 'otro', prefix: 'OTR' }, { title: 'T', description: '', profileId: 'dev', level: 2 }).id).toBe('OTR-1');
+  });
+
   it('numera desde startNumber y crea en borrador', () => {
     const a = newTask();
     const b = newTask();

@@ -86,6 +86,7 @@ describe('perfiles configurables', () => {
     const id = c.profiles[0].id;
     expect(() => normalizeConfig({ ...c, coordinatorProfile: id, projects: [{ ...c.projects[0], github: { ciProfile: id } }] })).not.toThrow();
     expect(() => normalizeConfig({ ...c, coordinatorProfile: 'nadie' })).toThrow('coordinatorProfile: perfil desconocido nadie');
+    expect(() => normalizeConfig({ ...c, title: ' ' })).toThrow('title debe ser un texto no vacío');
     expect(() => normalizeConfig({ ...c, projects: [{ ...c.projects[0], github: { ciProfile: 'nadie' } }] })).toThrow('github.ciProfile: perfil desconocido nadie');
   });
 });

@@ -252,6 +252,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     projects: config.projects.map((p) => ({ id: p.id, name: p.name, prefix: p.prefix, release: Boolean(p.release), metrics: Boolean(p.metrics), aso: Boolean(d.aso && p.aso) })),
     profiles: config.profiles.map((p) => ({ id: p.id, name: p.name, defaultLevel: p.defaultLevel })),
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
+    title: config.title ?? 'Faro',
   }));
 
   app.get('/api/tasks', async (req) => {

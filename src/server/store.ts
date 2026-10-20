@@ -266,7 +266,7 @@ export class Store {
 
   createTask(project: ProjectConfig, input: NewTaskInput): Task {
     return this.db.transaction(() => {
-      this.db.prepare('INSERT OR IGNORE INTO counters (project_id, next) VALUES (?, ?)').run(project.id, project.startNumber);
+      this.db.prepare('INSERT OR IGNORE INTO counters (project_id, next) VALUES (?, ?)').run(project.id, project.startNumber ?? 1);
       const { next } = this.db.prepare('SELECT next FROM counters WHERE project_id = ?').get(project.id) as { next: number };
       this.db.prepare('UPDATE counters SET next = next + 1 WHERE project_id = ?').run(project.id);
       const id = `${project.prefix}-${next}`;

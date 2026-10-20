@@ -138,7 +138,7 @@ export class GitWorkspaces implements Workspaces {
 
   private async prepareWorktree(project: ProjectConfig, wtPath: string): Promise<void> {
     await ensureExcluded(project.repoPath, project.exclude);
-    for (const cmd of project.prepare) {
+    for (const cmd of project.prepare ?? []) {
       const r = await sh(cmd, wtPath, 10 * 60_000);
       if (r.code !== 0) throw new Error(`Falló la preparación «${cmd}»: ${(r.stderr || r.stdout).trim()}`);
     }

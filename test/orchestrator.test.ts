@@ -556,7 +556,7 @@ describe('Orchestrator · mensajes', () => {
     const f = files();
     const { store, orch, add, config } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt', FAKE_COUNTER: f.counter });
     // Una comprobación de 1 s garantiza que el mensaje llega mientras la tarea sigue «working».
-    config.projects[0].checks.push({ name: 'Corto', command: 'sleep 1' });
+    config.projects[0].checks!.push({ name: 'Corto', command: 'sleep 1' });
     const id = add('Crear hola', 3);
     await until(() => store.listRuns(id)[0]?.endedAt != null);
     store.addComment(id, 'user', 'otra cosa', { pending: true });
@@ -608,7 +608,7 @@ describe('Orchestrator · mensajes', () => {
 
   it('parar durante las comprobaciones no crea subtareas', async () => {
     const { store, orch, add, config } = setup({ FAKE_FIXTURES: fixture('stream-subtasks.jsonl') });
-    config.projects[0].checks.push({ name: 'Lento', command: 'sleep 30' });
+    config.projects[0].checks!.push({ name: 'Lento', command: 'sleep 30' });
     const id = add();
     await until(() => (orch as unknown as { checkAborts: Map<string, unknown> }).checkAborts.has(id), 20000);
     await new Promise((r) => setTimeout(r, 200));
@@ -726,7 +726,7 @@ describe('Orchestrator · chats', () => {
 
   it('shutdown durante las comprobaciones devuelve la tarea a la cola', async () => {
     const { store, orch, add, config } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' });
-    config.projects[0].checks.push({ name: 'Lento', command: 'sleep 30' });
+    config.projects[0].checks!.push({ name: 'Lento', command: 'sleep 30' });
     const id = add();
     await until(() => store.listRuns(id)[0]?.endedAt != null);
     await until(() => (orch as unknown as { checkAborts: Map<string, unknown> }).checkAborts.has(id), 20000);

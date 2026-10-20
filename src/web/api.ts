@@ -11,6 +11,8 @@ export interface ConfigView {
   projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean }[];
   profiles: { id: string; name: string; defaultLevel: Level }[];
   coordinatorProfile: string;
+  /** Nombre del panel (config `title`, por defecto «Faro»). */
+  title: string;
 }
 
 export interface TaskDetail {

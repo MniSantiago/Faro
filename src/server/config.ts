@@ -38,6 +38,7 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
     if (!(p.timeoutMinutes > 0)) throw new ConfigError(`Tiempo máximo inválido en el perfil ${p.id}`);
   }
   if (!(raw.maxConcurrentRuns >= 1)) throw new ConfigError('maxConcurrentRuns debe ser al menos 1');
+  if (raw.title !== undefined && !text(raw.title)) throw new ConfigError('title debe ser un texto no vacío');
   const profileIds = new Set(raw.profiles.map((p) => p.id));
   if (raw.coordinatorProfile !== undefined && !profileIds.has(raw.coordinatorProfile)) {
     throw new ConfigError(`coordinatorProfile: perfil desconocido ${raw.coordinatorProfile}`);

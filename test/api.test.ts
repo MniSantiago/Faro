@@ -38,7 +38,7 @@ describe('API', () => {
   it('config expone proyectos y perfiles', async () => {
     const { app } = setup();
     const r = await inj(app, { method: 'GET', url: '/api/config' });
-    expect(r.json()).toEqual({ projects: [{ id: 'demo', name: 'Demo', prefix: 'DEM', release: false, metrics: false, aso: false }], profiles: [{ id: 'dev', name: 'Dev', defaultLevel: 2 }], coordinatorProfile: 'coordinador' });
+    expect(r.json()).toEqual({ projects: [{ id: 'demo', name: 'Demo', prefix: 'DEM', release: false, metrics: false, aso: false }], profiles: [{ id: 'dev', name: 'Dev', defaultLevel: 2 }], coordinatorProfile: 'coordinador', title: 'Faro' });
   });
 
   it('POST /api/tasks con release en un proyecto sin lanzamientos: 400; GET trae jobs', async () => {

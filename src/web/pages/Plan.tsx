@@ -43,6 +43,7 @@ export function Plan() {
   const toTest = state.unshipped.filter((u) => u.taskId && u.touchesApp && !u.tested);
   const tested = state.unshipped.filter((u) => u.taskId && u.touchesApp && u.tested);
   const b = state.build;
+  const release = cfg?.projects.find((p) => p.id === projectId)?.release ?? false;
 
   return (
     <div className="plan">
@@ -124,6 +125,7 @@ export function Plan() {
         )}
       </section>
 
+      {release && <>
       <section>
         <h2 className="sec">Sin enviar a la tienda <span className="count">{state.unshipped.length}</span></h2>
         <p className="muted plan-build">
@@ -148,7 +150,7 @@ export function Plan() {
       </section>
 
       <section>
-        <h2 className="sec">Por probar en el iPhone <span className="count">{toTest.length}</span></h2>
+        <h2 className="sec">Por probar en un dispositivo <span className="count">{toTest.length}</span></h2>
         <p className="muted plan-build">Lo de la app que está integrado y aún no has probado en un dispositivo.</p>
         {toTest.length === 0 ? <p className="muted">Nada por probar.</p> : (
           <ul className="plan-list">
@@ -178,6 +180,7 @@ export function Plan() {
           </details>
         )}
       </section>
+      </>}
     </div>
   );
 }

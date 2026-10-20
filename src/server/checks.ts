@@ -26,7 +26,7 @@ export async function runChecks(
 ): Promise<CheckResult[]> {
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
   const results: CheckResult[] = [];
-  for (const c of project.checks) {
+  for (const c of project.checks ?? []) {
     if (c.whenChanged && !changedFiles.some((f) => f.startsWith(c.whenChanged!))) {
       results.push({ name: c.name, ok: true, skipped: true, aborted: false, output: '', durationMs: 0 });
       continue;

@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "test", "scripts", "faro.config.ts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "test", "scripts", "faro.config.ts", "faro.config.example.ts", "vite.config.ts", "vitest.config.ts"]
 }
