@@ -236,4 +236,24 @@ describe('scheduler', () => {
     sched.sync();
     expect(store.getRoutine('semanal')).toMatchObject({ enabled: true, nextRunAt: before?.nextRunAt });
   });
+
+  it('cambiar el cron en la config y sincronizar recalcula nextRunAt en el acto', async () => {
+    const { store, sched, config } = setup([rutina()], new Date(2026, 9, 15, 12, 0));
+    sched.sync();
+    sched.toggle('semanal');
+    config.projects[0]!.routines![0]!.cron = '0 8 * * *';
+    sched.sync();
+    expect(store.getRoutine('semanal')).toMatchObject({ enabled: true, cron: '0 8 * * *', nextRunAt: new Date(2026, 9, 16, 8, 0).toISOString() });
+  });
+
+  it('quitar de la config una rutina con una tarea abierta: list no la incluye y la tarea sigue', async () => {
+    const { store, sched, config } = setup([rutina(), rutina({ id: 'otra' })], new Date(2026, 9, 15, 12, 0));
+    sched.sync();
+    const t = await sched.runNow('otra');
+    config.projects[0]!.routines!.splice(1, 1);
+    sched.sync();
+    expect(sched.list().map((r) => r.id)).toEqual(['semanal']);
+    expect(store.getRoutine('otra')).toBeNull();
+    expect(store.getTask(t.id)).toMatchObject({ routineId: 'otra', state: t.state });
+  });
 });

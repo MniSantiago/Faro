@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { assertTransition } from './taskState';
 import { AsoRepo } from './aso/repo';
 import type { Snapshot, SourceId } from './metrics/types';
+import type { OverrideKind, OverrideRow } from './overrides';
 import type {
   Approval, ApprovalState, Artifact, ArtifactKind, Comment, CommentAuthor, Device, EventKind, EventRow,
   FinalAction, Job, JobKind, JobState, Level, ProjectConfig, Question, Release, RoutineRow, Run, RunOutcome, Task,
@@ -84,6 +85,10 @@ CREATE INDEX IF NOT EXISTS metric_snapshots_lookup ON metric_snapshots (project_
 CREATE TABLE IF NOT EXISTS daily_downloads (
   project_id TEXT NOT NULL, day TEXT NOT NULL, country TEXT NOT NULL, units INTEGER NOT NULL,
   PRIMARY KEY (project_id, day, country)
+);
+CREATE TABLE IF NOT EXISTS config_overrides (
+  kind TEXT NOT NULL, id TEXT NOT NULL, origin TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL, device_id TEXT,
+  PRIMARY KEY (kind, id)
 );
 `;
 
@@ -601,6 +606,30 @@ export class Store {
 
   hasPendingUserMessages(taskId: string): boolean {
     return this.db.prepare("SELECT 1 FROM comments WHERE task_id = ? AND author = 'user' AND delivered_at IS NULL LIMIT 1").get(taskId) !== undefined;
+  }
+
+  // --- overrides de config (panel) ---
+
+  /** Overrides en el orden en que se guardaron (el más antiguo primero). */
+  listOverrides(): OverrideRow[] {
+    return (this.db.prepare('SELECT * FROM config_overrides ORDER BY updated_at, rowid').all() as Row[]).map((r) => ({
+      kind: r.kind as OverrideKind,
+      id: r.id as string,
+      origin: r.origin as OverrideRow['origin'],
+      data: JSON.parse(r.data as string) as Record<string, unknown>,
+      updatedAt: r.updated_at as string,
+      deviceId: (r.device_id as string | null) ?? null,
+    }));
+  }
+
+  setOverride(o: OverrideRow): void {
+    this.db.prepare(`INSERT INTO config_overrides (kind, id, origin, data, updated_at, device_id) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (kind, id) DO UPDATE SET origin = excluded.origin, data = excluded.data, updated_at = excluded.updated_at, device_id = excluded.device_id`)
+      .run(o.kind, o.id, o.origin, JSON.stringify(o.data), o.updatedAt, o.deviceId);
+  }
+
+  deleteOverride(kind: OverrideKind, id: string): void {
+    this.db.prepare('DELETE FROM config_overrides WHERE kind = ? AND id = ?').run(kind, id);
   }
 
   // --- rutinas ---

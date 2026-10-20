@@ -4,7 +4,7 @@ import { ReviewActions } from './actions';
 import { buildApp } from './api';
 import { Bus } from './bus';
 import { runChecks } from './checks';
-import { loadConfig } from './config';
+import { loadRawConfig, normalizeConfig } from './config';
 import { rotateLogs } from './logs';
 import { AsoCollector } from './aso/collector';
 import { storedOrCurrentFicha, type CurrentFicha } from './aso/ficha';
@@ -13,6 +13,7 @@ import { appstoreSource } from './metrics/appstore';
 import { posthogSource } from './metrics/posthog';
 import { revenuecatSource } from './metrics/revenuecat';
 import { Notifier } from './notifier';
+import { LiveConfig } from './overrides';
 import { loadVapid, Push } from './push';
 import { Releases } from './releases';
 import { Orchestrator } from './orchestrator';
@@ -31,11 +32,17 @@ import { GitHubWatcher } from './github-watch';
 
 // Antes de lanzar ningún proceso: los FARO_SECRET_* no deben llegar a agentes ni comprobaciones.
 takeEnvSecrets();
-const config = await loadConfig();
-rotateLogs(path.join(config.dataDir, 'logs'));
-mkdirSync(path.join(config.dataDir, 'artifacts'), { recursive: true });
+const raw = await loadRawConfig();
+// La base de datos (y con ella los overrides del panel) vive en el dataDir del archivo.
+const dataDir = normalizeConfig(raw).dataDir;
+rotateLogs(path.join(dataDir, 'logs'));
+mkdirSync(path.join(dataDir, 'artifacts'), { recursive: true });
 
-const store = new Store(path.join(config.dataDir, 'faro.db'));
+const store = new Store(path.join(dataDir, 'faro.db'));
+// Config efectiva = archivo + overrides; al guardar en el panel cambia en caliente y el programador resincroniza.
+const live = new LiveConfig({ raw, store, onChange: () => scheduler.sync() });
+const config = live.config;
+for (const i of live.ignored()) console.error(`[faro] override ignorado (${i.kind} ${i.id}): ${i.reason}`);
 const bus = new Bus();
 const workspaces = new GitWorkspaces();
 const runner = new Runner({ store, bus, claudeBin: config.claudeBin, defaultWindow: (taskId) => defaultWindow(config, taskId) });

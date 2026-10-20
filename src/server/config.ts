@@ -148,12 +148,17 @@ function checkFunnel(projectId: string, f: FunnelConfig): void {
   }
 }
 
-export async function loadConfig(file = path.resolve(process.env.FARO_CONFIG ?? 'faro.config.ts')): Promise<FaroConfig> {
+/** La config tal cual la exporta el archivo, sin validar ni expandir rutas (la base de los overrides del panel). */
+export async function loadRawConfig(file = path.resolve(process.env.FARO_CONFIG ?? 'faro.config.ts')): Promise<FaroConfig> {
   if (!existsSync(file)) {
     throw new ConfigError(`No existe ${file}: copia faro.config.example.ts a faro.config.ts (o apunta FARO_CONFIG a tu config).`);
   }
   const mod = (await import(pathToFileURL(file).href)) as { default: FaroConfig };
-  return normalizeConfig(mod.default);
+  return mod.default;
+}
+
+export async function loadConfig(file?: string): Promise<FaroConfig> {
+  return normalizeConfig(await loadRawConfig(file));
 }
 
 export function getProject(c: FaroConfig, id: string): ProjectConfig {
