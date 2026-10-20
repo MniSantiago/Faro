@@ -610,16 +610,27 @@ export class Store {
 
   // --- overrides de config (panel) ---
 
-  /** Overrides en el orden en que se guardaron (el más antiguo primero). */
-  listOverrides(): OverrideRow[] {
-    return (this.db.prepare('SELECT * FROM config_overrides ORDER BY updated_at, rowid').all() as Row[]).map((r) => ({
-      kind: r.kind as OverrideKind,
-      id: r.id as string,
-      origin: r.origin as OverrideRow['origin'],
-      data: JSON.parse(r.data as string) as Record<string, unknown>,
-      updatedAt: r.updated_at as string,
-      deviceId: (r.device_id as string | null) ?? null,
-    }));
+  /**
+   * Overrides en el orden en que se guardaron (el más antiguo primero). Una fila con JSON ilegible se salta (y se avisa con
+   * `onUnreadable`): no debe impedir que Faro arranque.
+   */
+  listOverrides(onUnreadable?: (kind: OverrideKind, id: string) => void): OverrideRow[] {
+    return (this.db.prepare('SELECT * FROM config_overrides ORDER BY updated_at, rowid').all() as Row[]).flatMap((r) => {
+      let data: unknown;
+      try { data = JSON.parse(r.data as string); } catch { data = null; }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        onUnreadable?.(r.kind as OverrideKind, r.id as string);
+        return [];
+      }
+      return [{
+        kind: r.kind as OverrideKind,
+        id: r.id as string,
+        origin: r.origin as OverrideRow['origin'],
+        data: data as Record<string, unknown>,
+        updatedAt: r.updated_at as string,
+        deviceId: (r.device_id as string | null) ?? null,
+      }];
+    });
   }
 
   setOverride(o: OverrideRow): void {

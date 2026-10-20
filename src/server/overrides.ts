@@ -25,7 +25,9 @@ type Obj = Record<string, unknown>;
 
 const LABEL: Record<OverrideKind, string> = { routine: 'Rutina', profile: 'Perfil', project: 'Proyecto', general: 'Generales' };
 /** Claves que no son campos del elemento: las lleva otro tipo de override (o, `projectId`, la fila de una rutina del panel). */
-const NOT_FIELDS: Record<OverrideKind, string[]> = { routine: ['projectId'], profile: [], project: ['routines'], general: ['projects', 'profiles'] };
+/** Generales que solo se leen al arrancar o tocan la seguridad: se editan en faro.config.ts, nunca desde el panel. */
+const FILE_ONLY_GENERAL = ['host', 'port', 'dataDir', 'allowedHosts', 'claudeBin', 'ghBin', 'sandbox', 'pushContact', 'projects', 'profiles'];
+const NOT_FIELDS: Record<OverrideKind, string[]> = { routine: ['projectId'], profile: [], project: ['routines'], general: FILE_ONLY_GENERAL };
 /** Primero lo que otros referencian: perfiles, luego proyectos, rutinas y por último Generales (coordinatorProfile). */
 const KIND_ORDER: OverrideKind[] = ['profile', 'project', 'routine', 'general'];
 
@@ -141,34 +143,43 @@ export class LiveConfig {
   readonly config: FaroConfig;
   private rows: OverrideRow[];
   private ignoredList: IgnoredOverride[];
+  /** Filas de la BD con datos ilegibles: no se aplican y se listan en `ignored()`. */
+  private unreadable: IgnoredOverride[] = [];
   /** El archivo normalizado: una ruta con «~» expandida cuenta como igual a la del archivo. */
   private readonly fileNormalized: FaroConfig;
 
   constructor(private d: { raw: FaroConfig; store: Store; onChange?: () => void }) {
-    this.rows = d.store.listOverrides();
+    this.rows = d.store.listOverrides((kind, id) => this.unreadable.push({ kind, id, reason: 'datos ilegibles' }));
     const r = applyOverrides(d.raw, this.rows);
     this.config = r.config;
     this.ignoredList = r.ignored;
     this.fileNormalized = normalizeConfig(clone(d.raw));
   }
 
-  /** Overrides guardados que no se aplican porque dejarían la config inválida. */
+  /** Overrides guardados que no se aplican: dejarían la config inválida o sus datos son ilegibles. */
   ignored(): IgnoredOverride[] {
-    return this.ignoredList.map((i) => ({ ...i }));
+    return [...this.unreadable, ...this.ignoredList].map((i) => ({ ...i }));
   }
 
   private row(kind: OverrideKind, id: string): OverrideRow | undefined {
     return this.rows.find((r) => r.kind === kind && r.id === id);
   }
 
-  origin(kind: OverrideKind, id: string): Origin {
-    if (!findElement(this.d.raw, kind, id)) return 'panel';
-    return this.row(kind, id) ? 'editada' : 'config';
+  /** El override de ese elemento, solo si está aplicado en la config efectiva. */
+  private applied(kind: OverrideKind, id: string): OverrideRow | undefined {
+    return this.ignoredList.some((i) => i.kind === kind && i.id === id) ? undefined : this.row(kind, id);
   }
 
-  /** Campos del archivo que tapa el override (vacío si no hay override o el elemento es del panel). */
+  /** Un override ignorado no cuenta: el elemento del archivo sigue siendo «config» y uno del panel no está en la config. */
+  origin(kind: OverrideKind, id: string): Origin {
+    const applied = this.applied(kind, id);
+    if (findElement(this.d.raw, kind, id)) return applied ? 'editada' : 'config';
+    return applied ? 'panel' : 'config';
+  }
+
+  /** Campos del archivo que tapa el override aplicado (vacío si no hay, está ignorado o el elemento es del panel). */
   overriddenFields(kind: OverrideKind, id: string): string[] {
-    const r = this.row(kind, id);
+    const r = this.applied(kind, id);
     return r?.origin === 'file' ? Object.keys(r.data) : [];
   }
 
@@ -180,6 +191,8 @@ export class LiveConfig {
    */
   save(kind: OverrideKind, id: string, value: Record<string, unknown>, by: { deviceId: string | null }): FaroConfig {
     if (kind === 'general' && id !== 'general') throw new ConfigError('Generales: el id es «general»');
+    const fileOnly = kind === 'general' ? Object.keys(value).filter((k) => FILE_ONLY_GENERAL.includes(k)) : [];
+    if (fileOnly.length) throw new ConfigError(`Se edita en faro.config.ts: ${fileOnly.join(', ')}`);
     const base = { kind, id, updatedAt: new Date().toISOString(), deviceId: by.deviceId };
     const prev = this.row(kind, id);
     const file = findElement(this.d.raw, kind, id);
@@ -201,7 +214,7 @@ export class LiveConfig {
 
   /** Elemento del archivo: borra su override (vuelve al archivo; sin override no hace nada). Del panel: lo borra. */
   remove(kind: OverrideKind, id: string): FaroConfig {
-    if (!this.row(kind, id)) {
+    if (!this.row(kind, id) && !this.unreadable.some((i) => i.kind === kind && i.id === id)) {
       if (findElement(this.d.raw, kind, id)) return this.config;
       throw new NotFoundError(`${LABEL[kind]} ${id}: no existe`);
     }
@@ -220,8 +233,15 @@ export class LiveConfig {
     else this.d.store.deleteOverride(kind, id);
     this.rows = rows;
     this.ignoredList = res.ignored;
+    // Guardar o borrar la fila sustituye la ilegible que hubiera.
+    this.unreadable = this.unreadable.filter((i) => key(i.kind, i.id) !== key(kind, id));
     copyInto(this.config, res.config);
-    this.d.onChange?.();
+    // El cambio ya está aplicado: un fallo al reaccionar (p. ej. resincronizar rutinas) no debe deshacerlo ni propagarse.
+    try {
+      this.d.onChange?.();
+    } catch (e) {
+      console.error('[faro] fallo al aplicar el cambio de config', e);
+    }
     return this.config;
   }
 }

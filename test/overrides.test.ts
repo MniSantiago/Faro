@@ -170,4 +170,54 @@ describe('LiveConfig', () => {
     expect(config.profiles).toBe(profiles);
     expect(dev.name).toBe('Desarrollo');
   });
+
+  it('Generales: los campos de arranque y seguridad no se editan desde el panel', () => {
+    const { live, store } = crear();
+    for (const k of ['host', 'port', 'dataDir', 'allowedHosts', 'claudeBin', 'ghBin', 'sandbox', 'pushContact', 'projects', 'profiles']) {
+      expect(() => live.save('general', 'general', { [k]: null }, mac)).toThrow(`Se edita en faro.config.ts: ${k}`);
+    }
+    expect(store.listOverrides()).toEqual([]);
+    live.save('general', 'general', { title: 'Mi Faro' }, mac);
+    expect(live.config.title).toBe('Mi Faro');
+  });
+
+  it('un parche guardado de Generales con campos de arranque no se aplica', () => {
+    const store = new Store(':memory:');
+    store.setOverride(fila({ kind: 'general', id: 'general', data: { port: 9999, title: 'X' } }));
+    const live = new LiveConfig({ raw: archivo(), store });
+    expect(live.config).toMatchObject({ port: 0, title: 'X' });
+  });
+
+  it('un override ignorado no cuenta como aplicado en origin ni overriddenFields', () => {
+    const store = new Store(':memory:');
+    store.setOverride(fila({ data: { cron: 'esto no es un cron' } }));
+    store.setOverride(fila({ id: 'nueva', origin: 'panel', data: { ...rutina({ id: 'nueva', profileId: 'fantasma' }), projectId: 'demo' } }));
+    const live = new LiveConfig({ raw: archivo(), store });
+    expect(live.ignored().map((i) => i.id)).toEqual(['semanal', 'nueva']);
+    expect(live.origin('routine', 'semanal')).toBe('config');
+    expect(live.overriddenFields('routine', 'semanal')).toEqual([]);
+    expect(live.origin('routine', 'nueva')).not.toBe('panel');
+  });
+
+  it('una fila con JSON ilegible no impide arrancar: se lista en ignored() y se puede borrar', () => {
+    const store = new Store(':memory:');
+    store.setOverride(fila({ data: { cron: '0 8 * * *' } }));
+    store.db.prepare("UPDATE config_overrides SET data = '{roto' WHERE id = 'semanal'").run();
+    const live = new LiveConfig({ raw: archivo(), store });
+    expect(live.ignored()).toEqual([{ kind: 'routine', id: 'semanal', reason: 'datos ilegibles' }]);
+    expect(live.config.projects[0]!.routines![0]!.cron).toBe('0 9 * * 1');
+    live.remove('routine', 'semanal');
+    expect(live.ignored()).toEqual([]);
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM config_overrides').get()).toEqual({ n: 0 });
+  });
+
+  it('si onChange falla, el cambio queda aplicado y no se propaga el error', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { live, store } = crear(archivo(), new Store(':memory:'), () => { throw new Error('sync roto'); });
+    expect(() => live.save('routine', 'semanal', { cron: '0 8 * * *' }, mac)).not.toThrow();
+    expect(live.config.projects[0]!.routines![0]!.cron).toBe('0 8 * * *');
+    expect(store.listOverrides()).toHaveLength(1);
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
 });
