@@ -63,7 +63,7 @@ describe('manifest', () => {
     const m = JSON.parse(readFileSync(join(PUBLIC, 'manifest.webmanifest'), 'utf8'));
     expect(m).toMatchObject({
       name: 'Faro', short_name: 'Faro', start_url: '/', scope: '/', display: 'standalone',
-      background_color: '#0c0a09', theme_color: '#b45309',
+      background_color: '#1b2236', theme_color: '#1b2236',
     });
     expect(m.icons).toEqual([
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
@@ -71,6 +71,12 @@ describe('manifest', () => {
       { src: '/icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
       { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ]);
+  });
+});
+
+describe('favicon.svg', () => {
+  it('existe y usa el ámbar de la marca', () => {
+    expect(readFileSync(join(PUBLIC, 'favicon.svg'), 'utf8')).toContain('#f2a93b');
   });
 });
 

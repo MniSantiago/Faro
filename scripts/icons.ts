@@ -1,4 +1,4 @@
-// Genera los iconos de la PWA (faro sobre el color de marca). Uso: npx tsx scripts/icons.ts
+// Genera los iconos de la PWA (faro «haz de luz» sobre azul noche). Uso: npx tsx scripts/icons.ts
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,15 +51,34 @@ export function encodePng(width: number, height: number, rgba: Uint8Array): Buff
 }
 
 type RGB = [number, number, number];
-const BRAND: RGB = [0xb4, 0x53, 0x09];
-const WHITE: RGB = [0xff, 0xff, 0xff];
-const LIGHT: RGB = [0xfd, 0xe6, 0x8a];
+const NAVY: RGB = [0x1b, 0x22, 0x36];
+const CREAM: RGB = [0xf4, 0xed, 0xe1];
+const AMBER: RGB = [0xf2, 0xa9, 0x3b];
 
-/** Coordenadas normalizadas 0..1 (y hacia abajo). */
-const trapezoid = (x: number, y: number, y0: number, y1: number, hw0: number, hw1: number): boolean =>
-  y >= y0 && y <= y1 && Math.abs(x - 0.5) <= hw0 + ((hw1 - hw0) * (y - y0)) / (y1 - y0);
-const rect = (x: number, y: number, y0: number, y1: number, hw: number): boolean =>
-  y >= y0 && y <= y1 && Math.abs(x - 0.5) <= hw;
+/** Punto dentro de un polígono convexo (vértices en cualquier sentido). */
+function inPoly(x: number, y: number, pts: [number, number][]): boolean {
+  let pos = false, neg = false;
+  for (let i = 0; i < pts.length; i++) {
+    const [ax, ay] = pts[i]!;
+    const [bx, by] = pts[(i + 1) % pts.length]!;
+    const cr = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+    if (cr > 0) pos = true; else if (cr < 0) neg = true;
+  }
+  return !(pos && neg);
+}
+
+/** Rectángulo con esquinas de radio r. */
+function inRoundRect(x: number, y: number, x0: number, y0: number, w: number, h: number, r: number): boolean {
+  const dx = Math.max(x0 + r - x, x - (x0 + w - r), 0);
+  const dy = Math.max(y0 + r - y, y - (y0 + h - r), 0);
+  return x >= x0 && x <= x0 + w && y >= y0 && y <= y0 + h && dx * dx + dy * dy <= r * r;
+}
+
+/** Cápsula (trazo redondeado) de (x0,y) a (x1,y) con grosor w. */
+function inCapsule(x: number, y: number, x0: number, x1: number, y0: number, w: number): boolean {
+  const cx = Math.min(Math.max(x, x0), x1);
+  return (x - cx) ** 2 + (y - y0) ** 2 <= (w / 2) ** 2;
+}
 
 function roundedBackground(x: number, y: number): boolean {
   const r = 0.18;
@@ -71,31 +90,24 @@ function roundedBackground(x: number, y: number): boolean {
 /** Capas del dibujo de abajo arriba: color y alfa en un punto, o null si no pinta. */
 interface Opts { fullBleed?: boolean; scale?: number }
 
+// Logo «haz de luz» (viewBox 48×48 de Logo.tsx). `FILL` es la fracción del icono que ocupa ese cuadro.
+const FILL = 0.8;
+const CENTER: [number, number] = [27, 23.75]; // centro del dibujo dentro del cuadro 48×48
+
 function sample(px0: number, py0: number, opts: Opts): { c: RGB; a: number } | null {
   if (!opts.fullBleed && !roundedBackground(px0, py0)) return null;
   // El dibujo se reduce alrededor del centro (zona segura de los iconos maskable).
-  const k = opts.scale ?? 1;
-  const x = 0.5 + (px0 - 0.5) / k;
-  const y = 0.5 + (py0 - 0.5) / k;
-  let out: { c: RGB; a: number } = { c: BRAND, a: 1 };
+  const k = (opts.scale ?? 1) * FILL;
+  const x = CENTER[0] + ((px0 - 0.5) / k) * 48;
+  const y = CENTER[1] + ((py0 - 0.5) / k) * 48;
+  let out: { c: RGB; a: number } = { c: NAVY, a: 1 };
   const paint = (c: RGB, a = 1) => {
     out = { c: out.c.map((v, i) => Math.round(v * (1 - a) + c[i]! * a)) as RGB, a: 1 };
   };
-  // Haces de luz: abanicos desde la linterna hacia los lados.
-  const ly = 0.29;
-  for (const dir of [-1, 1]) {
-    const t = (x - 0.5) * dir; // distancia horizontal desde el eje
-    if (t > 0.07 && t < 0.44 && Math.abs(y - ly) <= 0.015 + (t - 0.07) * 0.2) paint(LIGHT, 0.55);
-  }
-  // Base, torre, banda de color, galería, linterna, tejado.
-  if (rect(x, y, 0.84, 0.89, 0.2)) paint(WHITE);
-  if (trapezoid(x, y, 0.38, 0.84, 0.085, 0.145)) paint(WHITE);
-  if (trapezoid(x, y, 0.52, 0.6, 0.1, 0.113)) paint(BRAND);
-  if (trapezoid(x, y, 0.68, 0.76, 0.123, 0.135)) paint(BRAND);
-  if (rect(x, y, 0.34, 0.385, 0.125)) paint(WHITE);
-  if (rect(x, y, 0.235, 0.34, 0.06)) paint(LIGHT);
-  if (rect(x, y, 0.235, 0.34, 0.018)) paint(WHITE);
-  if (trapezoid(x, y, 0.15, 0.235, 0.0, 0.085)) paint(WHITE);
+  if (inPoly(x, y, [[22, 14], [46, 6], [46, 22]])) paint(AMBER, 0.55); // haz
+  if (inPoly(x, y, [[17, 18], [23, 18], [25, 40], [15, 40]])) paint(CREAM); // torre
+  if (inCapsule(x, y, 8, 32, 40, 3)) paint(CREAM); // base
+  if (inRoundRect(x, y, 16, 11, 8, 6, 1.5)) paint(AMBER); // linterna
   return out;
 }
 

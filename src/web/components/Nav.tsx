@@ -4,6 +4,7 @@ import { api, mergeTasks, subscribe, type ConfigView } from '../api';
 import { loadSeen, navSection, SEEN_EVENT, SEEN_KEY, seedSeenIfMissing, unreadChats, type NavSection } from '../chats';
 import { formatUsd } from '../format';
 import { inboxSections } from '../inbox';
+import { Logo } from './Logo';
 
 const ACTIVE = new Set<Task['state']>(['working', 'queued']);
 
@@ -131,7 +132,7 @@ export function Nav({ route }: { route: string }) {
   return (
     <>
       <nav className="sidebar" aria-label="Navegación">
-        <a href="#/" className="brand">{show.title}</a>
+        <a href="#/" className="brand"><Logo size={26} />{show.title}</a>
         <a href="#/" aria-current={cur('bandeja')}><Icon name="bandeja" /><span className="label">Bandeja</span>{badge}</a>
         <a href="#/chats" aria-current={cur('chats')}><Icon name="chats" /><span className="label">Chats</span>{dot}</a>
         <a href="#/plan" aria-current={cur('plan')}><Icon name="plan" /><span className="label">Plan</span></a>
