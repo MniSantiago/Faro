@@ -48,6 +48,13 @@ Desarrollo: `npm run dev` (servidor) y `npm run dev:web` (web en :5173 con proxy
 
 Arranque automático en el Mac: `scripts/install-launchd.sh` (usa el Node activo; con otro, `FARO_NODE=/ruta/a/node`). Para pararlo: `launchctl bootout gui/$(id -u)/com.faro.server`.
 
+## Portada y panel de configuración
+
+- **Portada.** La página de inicio resume cada proyecto: un titular, las cifras clave, la salud (CI, último build, versión en la tienda, PR abiertos, rutinas que fallaron) y la actividad de la semana. Cada cifra abre una vista de detalle con su serie diaria y sus desgloses. Sin `metrics`, GitHub ni `release` también funciona y enseña el gasto de Faro, la salud y la semana.
+- **Panel de configuración.** Las rutinas, los perfiles, el proyecto y los ajustes generales se editan desde la web. `faro.config.ts` es la semilla: lo que cambias en el panel se guarda en la base de datos y tiene prioridad sobre el archivo, campo a campo, y se aplica sin reiniciar. «Volver a la config» deshace el cambio y recupera el valor del archivo. Los ajustes del servidor (`host`, `port`, `dataDir`, `allowedHosts`, `claudeBin`, `sandbox`…) y el `mcpConfig` de un perfil solo se editan en el archivo, igual que las rutinas que publican en las tiendas.
+- **Desde un dispositivo vinculado** (el móvil por Tailscale) solo se cambian rutinas y perfiles hasta nivel 2: nada que ya sea de nivel 3-4, ni el perfil coordinador, ni un perfil que use una rutina de nivel 3-4. El Proyecto y los Generales solo se cambian desde el Mac. Lo comprueba el servidor; la web solo deshabilita los controles.
+- **Asistente de rutinas.** Describes una rutina en una frase y Claude redacta el borrador (nombre, horario, perfil, nivel 1-2, contexto, tope de gasto y prompt) para que lo revises antes de guardarlo. Cada llamada lanza `claude` con lo mínimo y un tope de 0,50 $, así que cuesta muy poco pero no es gratis, y va a tu cuenta. Un borrador a la vez y 50 como máximo al día.
+
 ## Personalizarlo
 
 Toda tu configuración vive en `faro.config.ts` (mira [`faro.config.example.ts`](faro.config.example.ts)):
@@ -55,15 +62,16 @@ Toda tu configuración vive en `faro.config.ts` (mira [`faro.config.example.ts`]
 | Opción | Para qué sirve |
 |---|---|
 | `title` | Nombre del panel en la web (por defecto `Faro`). |
-| `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo. |
+| `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo; opcionales `model`, `effort` (`--effort`) y `maxBudgetUsd` (tope de gasto por ejecución: al alcanzarlo, la tarea se bloquea). |
 | `coordinatorProfile` | Perfil de los chats y de dividir objetivos en subtareas (por defecto `coordinador`). |
 | `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Qué repo, qué rama y cómo se numeran las tareas (`DEM-1`…). |
 | `projects[].prepare`, `exclude` | Comandos para cada worktree nuevo (p. ej. enlazar `node_modules`) y rutas que nunca se commitean. |
 | `projects[].checks` | Comandos que tiene que pasar una tarea antes de revisión; `whenChanged` limita uno a una carpeta. |
-| `projects[].routines` | Tareas periódicas con cron, perfil, nivel y prompt (`{fecha}` es la fecha del día). |
+| `projects[].routines` | Tareas periódicas con cron, perfil, nivel y prompt (`{fecha}` es la fecha del día); `maxBudgetUsd` manda sobre el tope del perfil. |
 | `projects[].github` | `ci` vigila el CI, `prs` integra por PR y `ciProfile` elige quién arregla un CI roto. |
 | `projects[].metrics` | RevenueCat, App Store Connect y PostHog; `posthogFunnel` define las etapas, filtros y la tarjeta de conversión de tu embudo. |
 | `projects[].aso`, `release` | Keywords de la App Store y comandos de build y envío tras integrar (EAS por defecto). |
+| `retryWatchdog` | Cuánto sigue reintentando la CLI ante sobrecargas y límites de uso (activado, 5 min como máximo) antes de que Faro pause la cola. |
 | `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Servidor y ejecución. |
 
 El menú solo enseña Métricas y ASO si algún proyecto las usa, y el Plan solo enseña lo de la tienda si el proyecto tiene `release`.

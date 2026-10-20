@@ -50,6 +50,13 @@ Development: `npm run dev` (server) and `npm run dev:web` (UI on :5173, proxying
 
 Start at login on macOS: `scripts/install-launchd.sh` (uses the active Node; to pick another one, set `FARO_NODE=/path/to/node`). To stop it: `launchctl bootout gui/$(id -u)/com.faro.server`.
 
+## Home and settings panel
+
+- **Home.** The landing page sums up each project: a headline, key figures, health (CI, last build, store version, open PRs, failed routines) and the week's activity. Each figure opens a detail view with its daily series and breakdowns. Without `metrics`, GitHub or `release` it still works and shows Faro's own spend, health and week.
+- **Settings panel.** Routines, profiles, project and general settings can be edited from the web. `faro.config.ts` is the seed: whatever you change in the panel is saved in the database and takes precedence over the file, field by field, and applies without a restart. "Volver a la config" (back to config) drops the change and restores the file's value. Server settings (`host`, `port`, `dataDir`, `allowedHosts`, `claudeBin`, `sandbox`…) and a profile's `mcpConfig` are only edited in the file, and so are routines that publish to the stores.
+- **From a paired device** (your phone over Tailscale) you can only change routines and profiles up to level 2: nothing that is already level 3–4, the coordinator profile, or a profile used by a level 3–4 routine. Project and General settings can only be changed from the Mac. The server enforces this; the UI just disables the controls.
+- **Routine assistant.** Describe a routine in one sentence and Claude drafts it (name, schedule, profile, level 1–2, context, budget and prompt) for you to review before saving. Each call runs `claude` with a minimal setup and a $0.50 cap, so it costs very little but is not free, and it's charged to your account. One draft at a time, at most 50 per day.
+
 ## Customizing it
 
 Your whole setup lives in `faro.config.ts` (see [`faro.config.example.ts`](faro.config.example.ts)):
@@ -57,15 +64,16 @@ Your whole setup lives in `faro.config.ts` (see [`faro.config.example.ts`](faro.
 | Option | What it does |
 |---|---|
 | `title` | Panel name shown in the UI (default `Faro`). |
-| `profiles` | Roles: instructions each agent gets, default level and timeout. |
+| `profiles` | Roles: instructions each agent gets, default level and timeout; optional `model`, `effort` (`--effort`) and `maxBudgetUsd` (spending cap per run: when reached, the task is blocked). |
 | `coordinatorProfile` | Profile used for chats and for splitting goals into subtasks (default `coordinador`). |
 | `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Which repo, which branch, and how tasks are numbered (`DEM-1`…). |
 | `projects[].prepare`, `exclude` | Commands run in each new worktree (e.g. symlink `node_modules`) and paths never committed. |
 | `projects[].checks` | Commands a task must pass before review; `whenChanged` limits one to a folder. |
-| `projects[].routines` | Recurring tasks with a cron schedule, profile, level and prompt (`{fecha}` is today's date). |
+| `projects[].routines` | Recurring tasks with a cron schedule, profile, level and prompt (`{fecha}` is today's date); `maxBudgetUsd` overrides the profile's cap. |
 | `projects[].github` | `ci` watches CI, `prs` merges through PRs, `ciProfile` picks who fixes a failing CI. |
 | `projects[].metrics` | RevenueCat, App Store Connect and PostHog; `posthogFunnel` defines your funnel steps, filters and conversion card. |
 | `projects[].aso`, `release` | App Store keyword tracking, and build/submit commands after merging (EAS by default). |
+| `retryWatchdog` | How long the CLI keeps retrying on overload and usage limits (on by default, 5 min max) before Faro pauses the queue. |
 | `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Server and runtime settings. |
 
 The menu only shows Metrics and ASO when a project uses them, and the Plan page only shows the store sections when the project has `release`.

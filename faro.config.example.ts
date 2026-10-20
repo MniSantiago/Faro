@@ -16,6 +16,9 @@ const config: FaroConfig = {
   // allowedHosts: ['<mac>.<tailnet>.ts.net'],
   // Perfil de los chats y de dividir objetivos en subtareas (por defecto «coordinador»).
   coordinatorProfile: 'coordinador',
+  // Waits of the Claude CLI on usage limits and overload (CLAUDE_CODE_RETRY_WATCHDOG); on by default, 5 min max each.
+  // Esperas de la CLI ante límites de uso y sobrecarga (CLAUDE_CODE_RETRY_WATCHDOG); activado por defecto, 5 min como máximo.
+  // retryWatchdog: { enabled: true, maxWaitMs: 5 * 60_000, maxUsageLimitWaitMs: 5 * 60_000 },
   projects: [
     {
       id: 'demo',
@@ -74,6 +77,9 @@ const config: FaroConfig = {
             'Revisa el código en busca de bugs y code smells, empezando por lo que ha cambiado en los últimos 7 días ' +
             '(`git log --since=7.days`). No cambies código. Da los hallazgos ordenados por gravedad, cada uno con archivo:línea, ' +
             'qué falla y cómo comprobarlo. Para los graves propone subtareas (perfil dev, nivel 2) con el arreglo y un test que lo cubra.',
+          // Spending cap per run in USD (--max-budget-usd); overrides the profile's one.
+          // Tope de gasto por ejecución en dólares (--max-budget-usd); manda sobre el del perfil.
+          // maxBudgetUsd: 1.5,
         },
         {
           id: 'dependencias', name: 'Dependencias y seguridad', cron: '0 10 * * 1', profileId: 'calidad', level: 1,
@@ -99,6 +105,11 @@ const config: FaroConfig = {
       name: 'Desarrollo',
       instructions:
         'Trabajas en el código del proyecto. Sigues las convenciones del código existente y añades tests cuando cambias lógica.',
+      // Optional per profile: model, reasoning effort ('low' | 'medium' | 'high' | 'xhigh' | 'max', --effort) and a
+      // spending cap per run in USD (--max-budget-usd; when reached, the task is blocked with that reason).
+      // Opcionales por perfil: modelo, esfuerzo de razonamiento (--effort) y tope de gasto por ejecución en dólares
+      // (--max-budget-usd; al alcanzarlo, la tarea se bloquea con ese motivo).
+      // model: 'claude-opus-5-5', effort: 'high', maxBudgetUsd: 3,
       defaultLevel: 2,
       timeoutMinutes: 45,
     },
