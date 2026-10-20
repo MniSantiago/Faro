@@ -44,7 +44,7 @@ export function Metrics() {
       {error && <p className="error" role="alert">{error}</p>}
       <section>
         <h2>Resumen</h2>
-        {view.cards.length === 0 ? <p className="muted">Sin configurar: añade las claves del llavero (abajo) y pulsa «Actualizar ahora».</p>
+        {view.cards.length === 0 ? <p className="muted">Sin configurar: añade las claves (abajo) y pulsa «Actualizar ahora».</p>
           : <div className="metrics-row">{view.cards.map((c) => <MetricCard key={c.id} c={c} />)}</div>}
       </section>
       {funnel && <section>
@@ -82,8 +82,12 @@ export function Metrics() {
         </ul>
       </section>
       <section>
-        <h2>Claves en el llavero</h2>
-        <p className="muted">Faro nunca te pide ni guarda claves: ejecútalo tú en la Terminal del Mac y pega la clave cuando la pida.</p>
+        <h2>Claves</h2>
+        <p className="muted">
+          Faro nunca te pide ni guarda claves por la web. En el Mac, ejecuta el comando en la Terminal y pega la clave cuando la pida;
+          en cualquier sistema también puedes darla con la variable <code>FARO_SECRET_&lt;CUENTA&gt;</code> al arrancar Faro
+          (Faro la quita de su entorno para que no la hereden los agentes).
+        </p>
         <p className="muted">
           <strong>Ojo:</strong> los agentes de nivel 2 o más corren como tu usuario y podrían leer estas claves (es un límite del llavero
           de macOS; Faro solo les impide usar la herramienta <code>security</code>). Crea claves de solo lectura con el mínimo permiso

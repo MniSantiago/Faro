@@ -26,9 +26,11 @@ import { GitWorkspaces } from './workspaces';
 import { pruneClosedWorktrees, sweepFinishedParents } from './housekeeping';
 import { Plan } from './plan';
 import { GitHub } from './github';
-import { readSecret } from './keychain';
+import { readSecret, takeEnvSecrets } from './keychain';
 import { GitHubWatcher } from './github-watch';
 
+// Antes de lanzar ningún proceso: los FARO_SECRET_* no deben llegar a agentes ni comprobaciones.
+takeEnvSecrets();
 const config = await loadConfig();
 rotateLogs(path.join(config.dataDir, 'logs'));
 mkdirSync(path.join(config.dataDir, 'artifacts'), { recursive: true });

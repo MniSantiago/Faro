@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { addSecretCommand, readSecret } from '../src/server/keychain';
+import { addSecretCommand, envSecretName, readSecret, takeEnvSecrets } from '../src/server/keychain';
 
 const securityBin = path.resolve('test/fake-security.sh');
 
@@ -37,6 +37,20 @@ describe('llavero', () => {
   });
 
   it('da el comando exacto para guardar un secreto', () => {
-    expect(addSecretCommand('asc-p8')).toBe('security add-generic-password -U -s faro -a asc-p8 -w');
+    expect(addSecretCommand('asc-p8', 'darwin')).toBe('security add-generic-password -U -s faro -a asc-p8 -w');
+    expect(addSecretCommand('asc-p8', 'linux')).toBe('FARO_SECRET_ASC_P8=… (variable de entorno al arrancar Faro)');
+  });
+
+  it('fuera de macOS, sin variable de entorno, no hay secreto y no se llama a security', async () => {
+    expect(await readSecret('github-lectura', { platform: 'linux' })).toBeNull();
+  });
+
+  it('FARO_SECRET_* tiene prioridad y desaparece del entorno (no lo heredan los agentes)', async () => {
+    const env: NodeJS.ProcessEnv = { [envSecretName('revenuecat')]: 'sk_env', OTRA: '1', FARO_SECRET_VACIO: '' };
+    takeEnvSecrets(env);
+    expect(env).toEqual({ OTRA: '1' });
+    const fake = { ...process.env, FAKE_SECRET_revenuecat: 'sk_llavero' };
+    expect(await readSecret('revenuecat', { securityBin, env: fake })).toBe('sk_env');
+    expect(await readSecret('revenuecat', { platform: 'linux' })).toBe('sk_env');
   });
 });
