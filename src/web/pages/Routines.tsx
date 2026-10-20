@@ -45,6 +45,7 @@ export function Routines() {
             <div className="actions">
               <button className="btn primary" disabled={busy === r.id} onClick={() => act(r.id, () => api.runRoutine(r.id))}>Ejecutar ahora</button>
               <button className="btn" disabled={busy === r.id} onClick={() => act(r.id, () => api.toggleRoutine(r.id))}>{r.enabled ? 'Pausar' : 'Activar'}</button>
+              <a className="btn" href={`#/config/rutinas/${encodeURIComponent(r.id)}`}>Editar</a>
             </div>
           </li>
         ))}

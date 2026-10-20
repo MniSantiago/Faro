@@ -80,7 +80,7 @@ function Shell() {
             : route === '/chats' ? <Chats />
             : route === '/historial' ? <History />
             : route === '/bandeja' ? <Inbox />
-            : route === '/config' || route.startsWith('/config/') ? <Config />
+            : route === '/config' || route.startsWith('/config/') ? <Config route={route} />
             : detailMetric(route) ? <HomeDetail key={route} metric={detailMetric(route)!} />
             : <Home />}
         </main>

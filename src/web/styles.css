@@ -377,3 +377,65 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 .aso-ficha dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .aso-changes { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 .aso h2 .btn.small { margin-left: 8px; }
+
+/* Configuración: pestañas, lista + formulario (maqueta «config-rutinas-v2»). */
+.ctabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin: 4px 0 16px; overflow-x: auto; }
+.ctabs button { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 0; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.ctabs button.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.config-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.config-ignored { margin-bottom: 14px; font-size: 14px; }
+.config-ignored p { margin: 6px 0; }
+.clist { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: grid; }
+.cli { display: flex; justify-content: space-between; gap: 8px; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--fg);
+  background: none; border: 0; border-bottom: 1px solid var(--line); padding: 10px 14px; cursor: pointer; }
+.cli:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.cli.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cli-main { min-width: 0; overflow-wrap: anywhere; }
+.cli small { display: block; color: var(--muted); font-size: 12px; }
+.cli.new { border-bottom: 0; color: var(--accent-text); font-weight: 600; }
+.cli-empty { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.tag { font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; flex: none; }
+.tag.p { border-color: var(--accent); color: var(--accent-text); }
+.tag.off { opacity: .6; }
+.cdetail { min-width: 0; display: grid; gap: 12px; }
+.cdetail > .notice { margin: 0; }
+.rform { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; gap: 16px; }
+.rform-body { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.rform label, .rform .field { display: grid; gap: 6px; min-width: 0; }
+.rform label, .rform .flabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.rform input, .rform select, .rform textarea { padding: 10px 12px; font-size: 15px; color: var(--fg); text-transform: none; letter-spacing: 0; }
+.rform .check { font-size: 15px; color: var(--fg); text-transform: none; letter-spacing: 0; }
+.rform .mono { font-family: ui-monospace, monospace; }
+.rform .prompt { min-height: 200px; line-height: 1.5; resize: vertical; }
+.rform .r2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.rform .hint { font-size: 13px; color: var(--ok); text-transform: none; letter-spacing: 0; }
+.rform .hint.next { margin-top: -8px; }
+.rform .check { display: flex; gap: 8px; align-items: center; }
+.rform .check .hint { color: var(--muted); }
+.rform .check input { width: auto; }
+.rform .notice { margin: 0; }
+.rform fieldset:disabled { opacity: .7; }
+.tapado { margin-left: 6px; font-size: 10px; text-transform: none; letter-spacing: 0; padding: 0 6px; border-radius: 999px;
+  border: 1px solid var(--accent); color: var(--accent-text); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; }
+.seg button { flex: 1 1 auto; font: inherit; font-size: 14px; padding: 8px 12px; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.seg button:hover:not(:disabled) { color: var(--fg); }
+.seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
+.seg button:disabled { opacity: .45; cursor: default; }
+.days { display: flex; flex-wrap: wrap; gap: 6px; }
+.days .opt { min-width: 42px; text-align: center; }
+.suffix { display: flex; align-items: center; gap: 8px; }
+.suffix span { color: var(--muted); }
+.assistant { display: grid; gap: 8px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.assistant-row { display: flex; gap: 8px; text-transform: none; letter-spacing: 0; }
+.assistant-row input { flex: 1; min-width: 0; }
+.assistant .error { margin: 0; }
+.rform > .error { margin: 0; }
+.rform-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.rform-bar .origin { font-size: 13px; color: var(--muted); margin-right: auto; }
+@media (max-width: 767.98px) {
+  .config-grid { grid-template-columns: minmax(0, 1fr); }
+  .rform { padding: 14px; }
+  .rform .r2 { grid-template-columns: minmax(0, 1fr); }
+  .rform-bar .origin { flex-basis: 100%; }
+}

@@ -2,6 +2,7 @@ import type {
   ConfigFull, ConfigGeneralView, ConfigProfileView, ConfigProjectView, ConfigRoutineView, GeneralUpdateBody,
   ProfileCreateBody, ProfileUpdateBody, ProjectUpdateBody, RoutineCreateBody, RoutineUpdateBody,
 } from '../server/api-config';
+import type { RoutineDraft } from '../server/assistant';
 import type { BacklogItem } from '../server/backlog';
 import type { HomeMetric, HomeView, SeriesView } from '../server/home';
 import type { Card } from '../server/metrics/summary';
@@ -10,7 +11,7 @@ import type { KeywordRow } from './aso';
 import type { PlanState } from '../server/plan';
 import type { Approval, Artifact, BusMessage, Comment, Device, EventRow, Job, Level, QueueState, Release, Run, Spend, Task, TaskStats } from '../server/types';
 
-export type { BacklogItem, HomeMetric, HomeView, PlanState, SeriesView };
+export type { BacklogItem, HomeMetric, HomeView, PlanState, RoutineDraft, SeriesView };
 
 export interface ConfigView {
   projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean }[];
@@ -97,6 +98,8 @@ export const api = {
   createRoutineConfig: (b: RoutineCreateBody) => req<ConfigRoutineView>('POST', '/api/config/routines', b),
   saveRoutineConfig: (id: string, b: RoutineUpdateBody) => req<ConfigRoutineView>('PUT', `/api/config/routines/${encodeURIComponent(id)}`, b),
   deleteRoutineConfig: (id: string) => req<{ ok: true }>('DELETE', `/api/config/routines/${encodeURIComponent(id)}`),
+  // Asistente: redacta una rutina a partir de una frase; no guarda nada.
+  draftRoutine: (projectId: string, description: string) => req<RoutineDraft>('POST', '/api/config/routines/draft', { projectId, description }),
   createProfileConfig: (b: ProfileCreateBody) => req<ConfigProfileView>('POST', '/api/config/profiles', b),
   saveProfileConfig: (id: string, b: ProfileUpdateBody) => req<ConfigProfileView>('PUT', `/api/config/profiles/${encodeURIComponent(id)}`, b),
   deleteProfileConfig: (id: string) => req<{ ok: true }>('DELETE', `/api/config/profiles/${encodeURIComponent(id)}`),
