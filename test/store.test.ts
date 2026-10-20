@@ -375,4 +375,10 @@ describe('descargas por día y país', () => {
     expect([...store.downloadDays('demo', '2026-10-13')]).toEqual(['2026-10-13']);
     expect(store.downloadDays('demo', '2026-10-01')).toEqual(new Set(['2026-10-12', '2026-10-13']));
   });
+
+  it('un día vacío cuenta como conocido y suma 0', () => {
+    store.upsertDailyDownloads('demo', '2026-10-05', []);
+    expect(store.downloadDays('demo', '2026-10-01').has('2026-10-05')).toBe(true);
+    expect(store.dailyDownloads('demo', '2026-10-05', '2026-10-05')).toEqual([{ day: '2026-10-05', country: '', units: 0 }]);
+  });
 });

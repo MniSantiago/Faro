@@ -93,10 +93,15 @@ export const appstoreSource: MetricSource = {
           }
           const byDay: { day: string; rows: { country: string; units: number }[] }[] = [];
           let mostRecent: number | null = null;
-          for (const day of [latest, ...missing]) {
+          const days = [latest, ...missing];
+          for (const day of days) {
+            // Antigüedad en días (hora LA): el más reciente tiene 2.
+            const age = 2 + Math.round((Date.parse(`${latest}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000);
             try {
               const qs = `filter[frequency]=DAILY&filter[reportType]=SALES&filter[reportSubType]=SUMMARY&filter[vendorNumber]=${encodeURIComponent(vendor)}&filter[reportDate]=${day}&filter[version]=1_0`;
               const r = await ctx.fetch(`https://api.appstoreconnect.apple.com/v1/salesReports?${qs}`, { headers: { ...headers, Accept: 'application/a-gzip' } });
+              // Apple responde 404 si ese día no hubo ventas: pasados 3 días se da por día sin descargas (se guarda vacío y deja de pedirse).
+              if (r.status === 404 && age >= 4) { byDay.push({ day, rows: [] }); continue; }
               if (r.status !== 200) throw new Error(`respondió ${r.status}`);
               const rows = unitsByCountry(gunzipSync(Buffer.from(await r.arrayBuffer())).toString('utf8'), appId);
               if (rows === null) { notes.push('Descargas: el informe de ventas no trae la columna Apple Identifier'); break; }

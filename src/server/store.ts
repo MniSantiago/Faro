@@ -262,12 +262,15 @@ export class Store {
       .all(projectId, source, limit) as Row[]).map((r) => this.toSnapshot(r));
   }
 
-  /** Sustituye por completo las descargas de ese día de informe. */
+  /**
+   * Sustituye por completo las descargas de ese día de informe. Con `rows` vacío guarda una fila `country ''` con 0 unidades,
+   * para que el día cuente como conocido (día sin ventas); al sumar unidades esa fila no afecta, y quien agrupe por país la ignora.
+   */
   upsertDailyDownloads(projectId: string, day: string, rows: { country: string; units: number }[]): void {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM daily_downloads WHERE project_id = ? AND day = ?').run(projectId, day);
       const ins = this.db.prepare('INSERT INTO daily_downloads (project_id, day, country, units) VALUES (?, ?, ?, ?)');
-      for (const r of rows) ins.run(projectId, day, r.country, r.units);
+      for (const r of rows.length ? rows : [{ country: '', units: 0 }]) ins.run(projectId, day, r.country, r.units);
     })();
   }
 

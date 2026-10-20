@@ -171,9 +171,18 @@ describe('App Store', () => {
     const { c } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, (call) => (call.url.includes('/salesReports') ? sales(call) : routes()(call)));
     const r = await appstoreSource.collect(c);
     expect(r.data?.downloads).toBe(10);
+    // 2026-10-12 tiene 3 días: «aún no disponible», ni se guarda ni se anota como vacío.
     expect((r.data?.downloads_by_day as { day: string }[]).map((d) => d.day)).not.toContain('2026-10-12');
     expect((r.data?.downloads_by_day as unknown[]).length).toBe(5);
     expect(String(r.data?.notes)).toContain('404');
+  });
+
+  it('un 404 de un día de 4 o más días se devuelve como día vacío; 5xx no se guarda', async () => {
+    const sales = (call: Call) => (call.url.includes('[reportDate]=2026-10-11') ? json('{}', 404) : call.url.includes('[reportDate]=2026-10-10') ? json('{}', 500) : new Response(report, { status: 200 }));
+    const { c } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, (call) => (call.url.includes('/salesReports') ? sales(call) : routes()(call)));
+    const by = (await appstoreSource.collect(c)).data?.downloads_by_day as { day: string; rows: unknown[] }[];
+    expect(by.find((d) => d.day === '2026-10-11')).toEqual({ day: '2026-10-11', rows: [] });
+    expect(by.map((d) => d.day)).not.toContain('2026-10-10');
   });
 
   it('sin columna Apple Identifier no se cuentan descargas y queda nota', async () => {

@@ -127,6 +127,24 @@ describe('descargas por día', () => {
   });
 });
 
+describe('días vacíos', () => {
+  it('un día viejo vacío queda conocido y no se vuelve a pedir; uno reciente sin guardar sí', async () => {
+    const asked: string[][] = [];
+    const c = new MetricsCollector({
+      store, config: config(), secret, now: () => new Date('2026-10-15T10:00:00Z'),
+      sources: [src('appstore', async (ctx) => {
+        asked.push([...ctx.knownDownloadDays]);
+        return { configured: true, data: { downloads_by_day: [{ day: '2026-10-09', rows: [] }] } };
+      })],
+    });
+    await c.collectAll();
+    await c.collectAll();
+    expect(asked[0]).not.toContain('2026-10-09');
+    expect(asked[1]).toContain('2026-10-09');
+    expect(store.downloadDays('demo', '2026-10-12').size).toBe(0);
+  });
+});
+
 describe('snapshotNear', () => {
   it('elige la foto ok más cercana a 7 días antes', () => {
     const now = new Date('2026-10-15T12:00:00Z');
