@@ -231,7 +231,9 @@ export type BusMessage =
   | { type: 'task'; task: Task }
   | { type: 'event'; taskId: string; event: EventRow }
   | { type: 'queue'; queue: QueueState }
-  | { type: 'stats'; taskId: string; stats: TaskStats };
+  | { type: 'stats'; taskId: string; stats: TaskStats }
+  /** La config cambió desde el panel: la web la vuelve a pedir. */
+  | { type: 'config' };
 
 /** Dispositivo emparejado para el acceso remoto (fase 3). */
 export interface Device { id: string; name: string; createdAt: string; lastSeenAt: string | null }

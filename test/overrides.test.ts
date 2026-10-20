@@ -171,6 +171,17 @@ describe('LiveConfig', () => {
     expect(dev.name).toBe('Desarrollo');
   });
 
+  it('fileConfig: el archivo normalizado sin los overrides, siempre el mismo objeto', () => {
+    const { live } = crear();
+    live.save('routine', 'semanal', { level: 3 }, mac);
+    live.save('routine', 'nueva', { ...rutina({ id: 'nueva' }), projectId: 'demo' }, mac);
+    const file = live.fileConfig();
+    expect(file).toBe(live.fileConfig());
+    expect(file).not.toBe(live.config);
+    expect(file.projects[0]!.routines!.map((r) => [r.id, r.level])).toEqual([['semanal', 1]]);
+    expect(file.dataDir).not.toContain('~');
+  });
+
   it('Generales: los campos de arranque y seguridad no se editan desde el panel', () => {
     const { live, store } = crear();
     for (const k of ['host', 'port', 'dataDir', 'allowedHosts', 'claudeBin', 'ghBin', 'sandbox', 'pushContact', 'projects', 'profiles']) {

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { ReviewActions } from './actions';
@@ -117,7 +118,16 @@ metrics.start();
 const asoCollector = new AsoCollector({ store, config, push });
 if (config.projects.some((p) => p.aso)) asoCollector.start();
 
-const app = buildApp({ store, config, actions, orchestrator, bus, scheduler, releases, push, metrics, aso: { collector: asoCollector, ficha: asoFicha }, workspaces, plan, webDir: path.resolve('dist/web') });
+// Versión de la CLI para la pestaña Generales: se pregunta una vez (si falla, se reintenta en la siguiente visita).
+let claudeVersion: string | null = null;
+const getClaudeVersion = () => claudeVersion ? Promise.resolve(claudeVersion) : new Promise<string | null>((resolve) => {
+  execFile(config.claudeBin, ['--version'], { encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL' }, (err, stdout) => {
+    claudeVersion = err ? null : String(stdout).trim() || null;
+    resolve(claudeVersion);
+  });
+});
+
+const app = buildApp({ store, config, live, claudeVersion: getClaudeVersion, actions, orchestrator, bus, scheduler, releases, push, metrics, aso: { collector: asoCollector, ficha: asoFicha }, workspaces, plan, webDir: path.resolve('dist/web') });
 await app.listen({ host: config.host, port: config.port });
 console.log(`Faro escuchando en http://${config.host}:${config.port}`);
 

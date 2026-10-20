@@ -4,7 +4,9 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import { ActionError, BadRequestError, type ReviewActions } from './actions';
-import { addSecretCommand } from './keychain';
+import { registerConfigRoutes } from './api-config';
+import { ForbiddenError } from './errors';
+import { addSecretCommand, type SecretName } from './keychain';
 import { buildCards } from './metrics/summary';
 import { homeSeries, homeView } from './home';
 import type { AsoCollector } from './aso/collector';
@@ -22,6 +24,7 @@ import { ConfigError, getProject } from './config';
 import type { Orchestrator } from './orchestrator';
 import { isInside } from './paths';
 import { defaultWindow } from './stats';
+import type { LiveConfig } from './overrides';
 import { NotFoundError, type Store } from './store';
 import { InvalidTransitionError } from './taskState';
 import type { Releases } from './releases';
@@ -46,6 +49,12 @@ export interface ApiDeps {
   /** Para contar los commits sin subir; sin él, la bandeja solo ve los push pendientes. */
   workspaces?: Pick<Workspaces, 'ahead'>;
   config: FaroConfig;
+  /** Config viva con los overrides del panel (`config` es su `live.config`); sin ella, las rutas `/api/config/*` del panel no existen. */
+  live?: LiveConfig;
+  /** Para el estado de los secretos en el panel (por defecto, el llavero). */
+  secret?: (name: SecretName) => Promise<string | null>;
+  /** Versión de la CLI `claude` para la pestaña Generales; sin ella, null. */
+  claudeVersion?: () => Promise<string | null>;
   actions: ReviewActions;
   orchestrator: Pick<Orchestrator, 'queueState' | 'resume'>;
   bus: Bus;
@@ -163,6 +172,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof NotFoundError) return reply.code(404).send({ error: message });
     if (err instanceof AuthError) return reply.code(401).send({ error: message });
+    if (err instanceof ForbiddenError) return reply.code(403).send({ error: message });
     if (err instanceof ZodError) return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
     if (err instanceof ConfigError) return reply.code(400).send({ error: message });
     if (err instanceof BadRequestError) return reply.code(400).send({ error: message });
@@ -177,7 +187,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     return reply.code(500).send({ error: message });
   });
 
-  // Defensa del API local: Host conocido (contra DNS rebinding) y, en los POST, Origin propio y una
+  // Defensa del API local: Host conocido (contra DNS rebinding) y, en los POST/PUT/PATCH/DELETE, Origin propio y una
   // cabecera que un formulario o un fetch no-cors de otra web no pueden enviar (contra CSRF).
   const ports = (): Set<number> => {
     const set = new Set([config.port]);
@@ -204,7 +214,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
       }
     }
 
-    if (req.method !== 'POST') return;
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
     const origin = req.headers.origin;
     if (origin !== undefined && ![...hosts].some((h) => origin === `http://${h}` || origin === `https://${h}`)) {
       return reply.code(403).send({ error: `Origen no permitido: ${origin}` });
@@ -261,6 +271,8 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
     title: config.title ?? 'Faro',
   }));
+
+  if (d.live) registerConfigRoutes(app, { ...d, live: d.live });
 
   // Home: titular, cifras, salud y semana de un proyecto; y la serie de una cifra para su detalle.
   const homeProject = (projectId: string): string => {

@@ -156,6 +156,11 @@ export class LiveConfig {
     this.fileNormalized = normalizeConfig(clone(d.raw));
   }
 
+  /** La config del archivo, normalizada y sin overrides (la misma cada vez: solo lectura). Es lo que restaura «volver a la config». */
+  fileConfig(): FaroConfig {
+    return this.fileNormalized;
+  }
+
   /** Overrides guardados que no se aplican: dejarían la config inválida o sus datos son ilegibles. */
   ignored(): IgnoredOverride[] {
     return [...this.unreadable, ...this.ignoredList].map((i) => ({ ...i }));
