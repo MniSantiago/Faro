@@ -146,7 +146,7 @@ export class GitHubWatcher {
         title: `Arreglar el CI de ${project.baseBranch} (${jobs[0] ?? failed[0].workflowName})`,
         description: `${header}\n\nArregla la causa (no desactives ni saltes tests) y deja el CI en verde. ` +
           `Comprueba en local con los mismos comandos que el CI.\n\nLog de los pasos fallidos:\n${log}`,
-        profileId: this.ciProfile(jobs), level: 2,
+        profileId: this.ciProfile(project, jobs), level: 2,
       });
       taskId = t.id;
       bus.emitTask(t);
@@ -156,9 +156,11 @@ export class GitHubWatcher {
     this.d.notify(`El CI de ${project.baseBranch} falla`, `${project.name} · ${jobs.join(', ') || failed[0].workflowName} → ${taskId}`, `/#/tarea/${taskId}`);
   }
 
-  /** Perfil para arreglar el CI: web si solo fallan trabajos de backend, web o landing; si no, ios. */
-  private ciProfile(jobs: string[]): string {
+  /** Perfil para arreglar el CI: el de `github.ciProfile`; si no, web si solo fallan trabajos de backend, web o landing, o ios. */
+  private ciProfile(project: ProjectConfig, jobs: string[]): string {
     const ids = new Set(this.d.config.profiles.map((p) => p.id));
+    const chosen = project.github?.ciProfile;
+    if (chosen && ids.has(chosen)) return chosen;
     const wanted = jobs.length > 0 && jobs.every((j) => /backend|web|landing/i.test(j) && !/app en la web/i.test(j)) ? 'web' : 'ios';
     if (ids.has(wanted)) return wanted;
     return this.d.config.profiles.find((p) => p.defaultLevel >= 2)?.id ?? this.d.config.profiles[0].id;

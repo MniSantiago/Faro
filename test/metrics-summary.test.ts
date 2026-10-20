@@ -63,9 +63,9 @@ describe('buildCards', () => {
 
   it('si la última foto de la fuente es un error, usa la última correcta', () => {
     const s = new Store(':memory:');
-    s.addSnapshot('p', 'posthog', true, { conversion_paywall_compra: 0.1 }, null, daysAgo(1));
+    s.addSnapshot('p', 'posthog', true, { conversion: 0.1 }, null, daysAgo(1));
     s.addSnapshot('p', 'posthog', false, {}, 'PostHog respondió 500', NOW);
-    const c = buildCards(s, 'p', NOW).find((x) => x.id === 'conversion_paywall_compra');
+    const c = buildCards(s, 'p', NOW).find((x) => x.id === 'conversion');
     expect(c).toMatchObject({ value: 0.1, format: 'percent', takenAt: daysAgo(1).toISOString() });
   });
 });
@@ -86,8 +86,8 @@ describe('metricsContext', () => {
     expect(metricsContext(s, 'p', NOW)).toBeNull();
     s.addSnapshot('p', 'revenuecat', true, { mrr: 100 }, null, daysAgo(7));
     s.addSnapshot('p', 'revenuecat', true, { mrr: 125 }, null, NOW);
-    s.addSnapshot('p', 'posthog', true, { conversion_paywall_compra: 0.1, onboarding_iniciado: 100 }, null, NOW);
-    const t = metricsContext(s, 'p', NOW)!;
+    s.addSnapshot('p', 'posthog', true, { conversion: 0.1, onboarding_iniciado: 100 }, null, NOW);
+    const t = metricsContext(s, 'p', NOW, { posthogFunnel: { steps: [{ event: 'x', label: 'X' }], conversion: { from: 'x', to: 'x', label: 'Conversión paywall → compra' } } })!;
     expect(t).toMatch(/MRR: 125[,.]00/);
     expect(t).toContain('+25,0 %');
     expect(t).toMatch(/Conversión paywall → compra: 10[,.]0 %/);

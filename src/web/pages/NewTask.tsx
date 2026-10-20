@@ -18,7 +18,7 @@ export function NewTask() {
     api.config().then((c) => {
       setCfg(c);
       setProjectId(c.projects[0]?.id ?? '');
-      const p = c.profiles.find((x) => x.id !== 'coordinador') ?? c.profiles[0];
+      const p = c.profiles.find((x) => x.id !== c.coordinatorProfile) ?? c.profiles[0];
       if (p) { setProfileId(p.id); setLevel(p.defaultLevel); }
     }).catch((e: Error) => setError(e.message));
     const params = new URLSearchParams(location.hash.split('?')[1] ?? '');

@@ -13,6 +13,7 @@ import { AsoProposalError } from './aso/repo';
 import type { AsoStoreConfig } from './aso/types';
 import { opportunity } from './aso/scores';
 import type { MetricsCollector } from './metrics/collector';
+import type { FunnelConfig } from './metrics/types';
 import type { Push } from './push';
 import { Auth, AuthError, isLocalRequest } from './auth';
 import type { Bus } from './bus';
@@ -250,6 +251,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
   app.get('/api/config', async () => ({
     projects: config.projects.map((p) => ({ id: p.id, name: p.name, prefix: p.prefix, release: Boolean(p.release), metrics: Boolean(p.metrics), aso: Boolean(d.aso && p.aso) })),
     profiles: config.profiles.map((p) => ({ id: p.id, name: p.name, defaultLevel: p.defaultLevel })),
+    coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
   }));
 
   app.get('/api/tasks', async (req) => {
@@ -389,7 +391,8 @@ export function buildApp(d: ApiDeps): FastifyInstance {
       if (!config.projects.some((p) => p.id === project)) return reply.code(404).send({ error: 'Proyecto desconocido' });
       return {
         status: metrics.status(project),
-        cards: buildCards(store, project, new Date()),
+        cards: buildCards(store, project, new Date(), getProject(config, project).metrics),
+        funnel: funnelView(getProject(config, project).metrics?.posthogFunnel),
         keychain: Object.fromEntries((['revenuecat', 'posthog', 'asc-key-id', 'asc-issuer', 'asc-p8'] as const).map((n) => [n, addSecretCommand(n)])),
       };
     });
@@ -572,4 +575,9 @@ export function buildApp(d: ApiDeps): FastifyInstance {
   }
 
   return app;
+}
+
+/** Lo que la web necesita del embudo: título y etapas (sin las condiciones HogQL). */
+function funnelView(f: FunnelConfig | undefined): { title: string; steps: { event: string; label: string }[] } | null {
+  return f ? { title: f.title ?? 'Embudo', steps: f.steps.map(({ event, label }) => ({ event, label })) } : null;
 }

@@ -55,7 +55,8 @@ export interface ProjectConfig {
   /** Comandos de build y envío que ejecuta Faro tras integrar (fase 2). */
   release?: ReleaseConfig;
   /** GitHub con `gh`: `ci` vigila el CI de la rama base; `prs` integra cada tarea por PR (squash al pasar el CI). */
-  github?: { ci?: boolean; prs?: boolean };
+  /** `ciProfile`: perfil de las tareas que arreglan el CI (si falta, se elige uno con nivel ≥ 2). */
+  github?: { ci?: boolean; prs?: boolean; ciProfile?: string };
   /** Archivo del plugin `pendientes` de Claude Code con el backlog del proyecto (página «Plan»). */
   backlogFile?: string;
   /** Identificadores no secretos de las fuentes de métricas (fase 4); los secretos van en el llavero. */
@@ -90,6 +91,8 @@ export interface FaroConfig {
   maxConcurrentRuns: number;
   /** Lanza agentes y comprobaciones dentro de `sandbox-exec` en macOS (por defecto, sí). */
   sandbox?: boolean;
+  /** Perfil de las conversaciones y de dividir objetivos en subtareas (por defecto `coordinador`). */
+  coordinatorProfile?: string;
   projects: ProjectConfig[];
   profiles: ProfileConfig[];
 }

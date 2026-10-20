@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Cron } from 'croner';
 import type { FaroConfig, ProfileConfig, ProjectConfig } from './types';
+import type { FunnelConfig } from './metrics/types';
 
 export class ConfigError extends Error {}
 
@@ -37,6 +38,14 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
     if (!(p.timeoutMinutes > 0)) throw new ConfigError(`Tiempo máximo inválido en el perfil ${p.id}`);
   }
   if (!(raw.maxConcurrentRuns >= 1)) throw new ConfigError('maxConcurrentRuns debe ser al menos 1');
+  const profileIds = new Set(raw.profiles.map((p) => p.id));
+  if (raw.coordinatorProfile !== undefined && !profileIds.has(raw.coordinatorProfile)) {
+    throw new ConfigError(`coordinatorProfile: perfil desconocido ${raw.coordinatorProfile}`);
+  }
+  for (const p of projects) {
+    const ci = p.github?.ciProfile;
+    if (ci !== undefined && !profileIds.has(ci)) throw new ConfigError(`Proyecto ${p.id}: github.ciProfile: perfil desconocido ${ci}`);
+  }
   const routines = projects.flatMap((p) => p.routines ?? []);
   const dupRoutine = firstDuplicate(routines.map((r) => r.id));
   if (dupRoutine) throw new ConfigError(`Rutina duplicada: ${dupRoutine}`);
@@ -62,9 +71,11 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
     const m = p.metrics;
     if (!m) continue;
     for (const [k, v] of Object.entries(m)) {
+      if (k === 'posthogFunnel') continue;
       if (!METRICS_KEYS.includes(k)) throw new ConfigError(`Proyecto ${p.id}: metrics.${k} no es una clave conocida`);
       if (v !== undefined && (typeof v !== 'string' || !v.trim())) throw new ConfigError(`Proyecto ${p.id}: metrics.${k} debe ser un texto no vacío`);
     }
+    if (m.posthogFunnel !== undefined) checkFunnel(p.id, m.posthogFunnel);
     if (m.posthogHost) {
       let u: URL | null = null;
       try { u = new URL(m.posthogHost); } catch { /* inválida */ }
@@ -95,6 +106,28 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
     }
   }
   return { ...raw, dataDir: expandHome(raw.dataDir), projects, profiles: raw.profiles };
+}
+
+const text = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+
+function checkFunnel(projectId: string, f: FunnelConfig): void {
+  const bad = (msg: string) => new ConfigError(`Proyecto ${projectId}: metrics.posthogFunnel.${msg}`);
+  if (!f || !Array.isArray(f.steps) || f.steps.length === 0) throw bad('steps debe tener al menos una etapa');
+  for (const st of f.steps) {
+    if (typeof st.event !== 'string' || !/^[\w$.:-]+$/.test(st.event)) throw bad(`steps[].event «${String(st.event)}» solo admite letras, números y _ $ . : -`);
+    if (!text(st.label)) throw bad(`steps[${st.event}].label debe ser un texto no vacío`);
+    if (st.where !== undefined && !text(st.where)) throw bad(`steps[${st.event}].where debe ser un texto no vacío`);
+  }
+  const dup = firstDuplicate(f.steps.map((st) => st.event));
+  if (dup) throw bad(`steps repite el evento «${dup}»`);
+  if (f.filter !== undefined && !text(f.filter)) throw bad('filter debe ser un texto no vacío');
+  if (f.title !== undefined && !text(f.title)) throw bad('title debe ser un texto no vacío');
+  const c = f.conversion;
+  if (c !== undefined) {
+    const events = f.steps.map((st) => st.event);
+    if (!events.includes(c.from) || !events.includes(c.to)) throw bad('conversion.from y conversion.to deben ser eventos de steps');
+    if (!text(c.label)) throw bad('conversion.label debe ser un texto no vacío');
+  }
 }
 
 export async function loadConfig(file = path.resolve(process.env.FARO_CONFIG ?? 'faro.config.ts')): Promise<FaroConfig> {

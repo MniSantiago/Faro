@@ -71,7 +71,7 @@ export class ReviewActions {
 
   createChat(i: { projectId: string; text: string }): Task {
     const project = getProject(this.d.config, i.projectId);
-    const profile = getProfile(this.d.config, 'coordinador');
+    const profile = getProfile(this.d.config, this.d.config.coordinatorProfile ?? 'coordinador');
     const text = i.text.trim();
     if (!text) throw new BadRequestError('El mensaje está vacío');
     const t = this.d.store.createTask(project, { title: chatTitle(text), description: '', profileId: profile.id, level: 1, kind: 'chat' });

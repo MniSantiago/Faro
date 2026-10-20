@@ -27,7 +27,7 @@ describe('asoContext', () => {
     expect(out).toContain('```aso-json');
     expect(out).not.toContain('.faro/artifacts/aso.json');
     expect(out).toContain('documentación de marketing del repo');
-    expect(out).toContain('Opal, Forest, one sec, Finch');
+    expect(out).toContain('competidores que ya conozcas');
   });
 
   it('sin keywords pide una lista inicial; sin ficha lo dice', () => {

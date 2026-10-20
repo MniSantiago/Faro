@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { appstoreSource } from '../src/server/metrics/appstore';
-import { FUNNEL_EVENTS, posthogSource } from '../src/server/metrics/posthog';
+import { funnelQuery, posthogSource } from '../src/server/metrics/posthog';
 import { revenuecatSource } from '../src/server/metrics/revenuecat';
 import type { MetricsConfig, SourceContext } from '../src/server/metrics/types';
 
@@ -47,7 +47,20 @@ describe('RevenueCat', () => {
 });
 
 describe('PostHog', () => {
-  const cfg = { posthogProjectId: '77', posthogHost: 'https://eu.posthog.com' };
+  const posthogFunnel = {
+    filter: "properties.entorno = 'produccion'",
+    steps: [
+      { event: 'onboarding_iniciado', label: 'Onboarding iniciado' },
+      { event: 'permiso_tiempo_uso', label: 'Permiso concedido', where: "properties.resultado = 'concedido'" },
+      { event: 'apps_elegidas', label: 'Apps elegidas' },
+      { event: 'onboarding_completado', label: 'Onboarding completado' },
+      { event: 'paywall_visto', label: 'Paywall visto' },
+      { event: 'compra_iniciada', label: 'Compra iniciada' },
+      { event: 'compra_completada', label: 'Compra completada' },
+    ],
+    conversion: { from: 'paywall_visto', to: 'compra_completada', label: 'Conversión paywall → compra' },
+  };
+  const cfg = { posthogProjectId: '77', posthogHost: 'https://eu.posthog.com', posthogFunnel };
   it('manda la consulta del embudo, rellena ceros y calcula la conversión', async () => {
     const { c, calls } = ctx(cfg, { posthog: 'phx_secret' }, () => json(fixture('posthog-query.json')));
     const r = await posthogSource.collect(c);
@@ -58,22 +71,29 @@ describe('PostHog', () => {
     expect(q.kind).toBe('HogQLQuery');
     expect(q.query).toContain("properties.entorno = 'produccion'");
     expect(q.query).toContain('INTERVAL 7 DAY');
-    // El permiso solo cuenta si se concedió (Demo manda resultado: 'concedido' | 'denegado').
-    expect(q.query).toContain("(event != 'permiso_tiempo_uso' OR properties.resultado = 'concedido')");
-    for (const e of FUNNEL_EVENTS) expect(q.query).toContain(`'${e}'`);
-    expect(r.data).toMatchObject({ onboarding_iniciado: 100, apps_elegidas: 60, paywall_visto: 40, compra_completada: 4, permiso_tiempo_uso: 0, compra_iniciada: 0, conversion_paywall_compra: 0.1 });
+    // La condición de una etapa solo se aplica a su evento.
+    expect(q.query).toContain("(event != 'permiso_tiempo_uso' OR (properties.resultado = 'concedido'))");
+    for (const st of posthogFunnel.steps) expect(q.query).toContain(`'${st.event}'`);
+    expect(r.data).toMatchObject({ onboarding_iniciado: 100, apps_elegidas: 60, paywall_visto: 40, compra_completada: 4, permiso_tiempo_uso: 0, compra_iniciada: 0, conversion: 0.1 });
   });
   it('ignora eventos heredados de Object.prototype', async () => {
     const { c } = ctx(cfg, { posthog: 'k' }, () => json('{"results":[["toString",5],["paywall_visto",10],["compra_completada",1]]}'));
     const r = await posthogSource.collect(c);
     expect(Object.hasOwn(r.data!, 'toString')).toBe(false);
-    expect(r.data?.conversion_paywall_compra).toBe(0.1);
+    expect(r.data?.conversion).toBe(0.1);
   });
   it('conversión null si nadie vio el paywall; sin config no está configurada', async () => {
     const { c } = ctx(cfg, { posthog: 'k' }, () => json('{"results":[]}'));
-    expect((await posthogSource.collect(c)).data?.conversion_paywall_compra).toBeNull();
+    expect((await posthogSource.collect(c)).data?.conversion).toBeNull();
+    expect(await posthogSource.collect(ctx({ ...cfg, posthogFunnel: undefined }, { posthog: 'k' }, () => json('{}')).c)).toEqual({ configured: false });
     expect(await posthogSource.collect(ctx({ posthogHost: cfg.posthogHost }, { posthog: 'k' }, () => json('{}')).c)).toEqual({ configured: false });
     expect(await posthogSource.collect(ctx(cfg, {}, () => json('{}')).c)).toEqual({ configured: false });
+  });
+  it('sin conversion no calcula la clave; los textos van entre comillas escapadas', async () => {
+    const f = { steps: [{ event: 'a', label: 'A' }, { event: "b'c", label: 'B' }] };
+    expect(funnelQuery(f)).toBe("SELECT event, count(DISTINCT person_id) FROM events WHERE timestamp > now() - INTERVAL 7 DAY AND event IN ('a', 'b\\'c') GROUP BY event");
+    const { c } = ctx({ ...cfg, posthogFunnel: { steps: [{ event: 'a', label: 'A' }] } }, { posthog: 'k' }, () => json('{"results":[["a",3]]}'));
+    expect((await posthogSource.collect(c)).data).toEqual({ a: 3 });
   });
   it('HTTP ≠ 200 da error sin secreto', async () => {
     const { c } = ctx(cfg, { posthog: 'phx_secret' }, () => json('{}', 403));

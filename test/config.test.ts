@@ -80,6 +80,16 @@ describe('normalizeConfig', () => {
   });
 });
 
+describe('perfiles configurables', () => {
+  it('coordinatorProfile y github.ciProfile deben ser perfiles existentes', () => {
+    const c = base();
+    const id = c.profiles[0].id;
+    expect(() => normalizeConfig({ ...c, coordinatorProfile: id, projects: [{ ...c.projects[0], github: { ciProfile: id } }] })).not.toThrow();
+    expect(() => normalizeConfig({ ...c, coordinatorProfile: 'nadie' })).toThrow('coordinatorProfile: perfil desconocido nadie');
+    expect(() => normalizeConfig({ ...c, projects: [{ ...c.projects[0], github: { ciProfile: 'nadie' } }] })).toThrow('github.ciProfile: perfil desconocido nadie');
+  });
+});
+
 describe('metrics', () => {
   it('rechaza un posthogHost que no sea https y valores vacíos', () => {
     const c = base();
@@ -89,6 +99,19 @@ describe('metrics', () => {
     expect(() => normalizeConfig(c)).toThrow(/ascAppId/);
     c.projects[0].metrics = { posthogProjectID: '1' } as never;
     expect(() => normalizeConfig(c)).toThrow(/posthogProjectID/);
+  });
+
+  it('valida el embudo de PostHog', () => {
+    const c = base();
+    const withFunnel = (posthogFunnel: unknown) => { c.projects[0].metrics = { posthogFunnel } as never; return () => normalizeConfig(c); };
+    const steps = [{ event: 'a', label: 'A' }, { event: 'b', label: 'B' }];
+    expect(withFunnel({ steps, conversion: { from: 'a', to: 'b', label: 'A → B' }, filter: "x = 'y'" })).not.toThrow();
+    expect(withFunnel({ steps: [] })).toThrow('posthogFunnel.steps debe tener al menos una etapa');
+    expect(withFunnel({ steps: [{ event: "a' OR 1", label: 'A' }] })).toThrow(/solo admite letras/);
+    expect(withFunnel({ steps: [...steps, { event: 'a', label: 'A2' }] })).toThrow('repite el evento «a»');
+    expect(withFunnel({ steps: [{ event: 'a', label: '' }] })).toThrow(/label/);
+    expect(withFunnel({ steps, conversion: { from: 'a', to: 'z', label: 'X' } })).toThrow(/conversion.from y conversion.to/);
+    expect(withFunnel({ steps, filter: ' ' })).toThrow(/filter/);
   });
 
   it('contextWindow del proyecto: se acepta un entero positivo y se rechaza lo demás', () => {

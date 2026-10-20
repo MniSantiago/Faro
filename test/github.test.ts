@@ -20,14 +20,15 @@ const FAKE_GH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fake-gh
 interface GhState { prs: { number: number; title: string; headRefName: string; state: string; statusCheckRollup: unknown[] }[]; runs: unknown[]; [k: string]: unknown }
 
 /** Repo con origin desnudo, proyecto en modo PR y un gh falso con su estado en un JSON. */
-function setup(opts: { ci?: boolean } = {}) {
+function setup(opts: { ci?: boolean; ciProfile?: string } = {}) {
   const repo = makeRepo();
   const origin = path.join(tmpDir(), 'origin.git');
   gitSync(repo, 'init', '-q', '--bare', origin);
   gitSync(repo, 'remote', 'add', 'origin', origin);
   gitSync(repo, 'push', '-q', 'origin', 'main');
   const config = makeConfig(repo);
-  config.projects[0].github = { prs: true, ci: opts.ci };
+  config.projects[0].github = { prs: true, ci: opts.ci, ciProfile: opts.ciProfile };
+  config.profiles.push({ id: 'qa', name: 'QA', instructions: 'Arreglas el CI.', defaultLevel: 2, timeoutMinutes: 1 });
   const ghState = path.join(tmpDir(), 'gh.json');
   writeFileSync(ghState, JSON.stringify({ prs: [], runs: [], defaultChecks: [{ name: 'App', status: 'IN_PROGRESS', conclusion: '' }] }));
   const gh = new GitHub(FAKE_GH, { ...process.env, FAKE_GH_STATE: ghState, FAKE_GH_ORIGIN: origin });
@@ -184,6 +185,13 @@ describe('vigilancia del CI de main', () => {
     s.write((st) => { st.runs = [run('d', 'success'), run('c', 'failure')]; });
     await s.watcher.checkCi();
     expect(s.notes.at(-1)).toBe('El CI de main vuelve a pasar');
+  });
+
+  it('la tarea de arreglo usa github.ciProfile si está configurado', async () => {
+    const s = setup({ ci: true, ciProfile: 'qa' });
+    s.write((st) => { st.runs = [run('b', 'failure')]; st.failedLog = 'x'; });
+    await s.watcher.checkCi();
+    expect(s.store.listTasks().find((t) => t.title.startsWith('Arreglar el CI'))?.profileId).toBe('qa');
   });
 
   it('ignora un commit con ejecuciones aún en curso', async () => {

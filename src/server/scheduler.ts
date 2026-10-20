@@ -81,7 +81,7 @@ export class Scheduler {
   private async launch(project: ProjectConfig, r: RoutineConfig, at: Date): Promise<Task> {
     let description = expandTemplate(r.prompt, at);
     if (r.context === 'metrics') {
-      description += `\n\nDatos de las últimas fotos de métricas (Faro):\n${metricsContext(this.d.store, project.id, at) ?? '(no hay fotos de métricas todavía)'}`;
+      description += `\n\nDatos de las últimas fotos de métricas (Faro):\n${metricsContext(this.d.store, project.id, at, project.metrics) ?? '(no hay fotos de métricas todavía)'}`;
     }
     if (r.context === 'estado') {
       let plan = null;

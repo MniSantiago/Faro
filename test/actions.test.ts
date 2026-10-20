@@ -415,6 +415,14 @@ describe('ReviewActions · chats', () => {
     expect(t.endsWith('…')).toBe(true);
   });
 
+  it('createChat usa coordinatorProfile si está configurado', async () => {
+    const cfg = makeConfig(makeRepo());
+    const s = setup(DONE, { coordinatorProfile: cfg.profiles[0].id });
+    const t = s.actions.createChat({ projectId: 'demo', text: 'Hola' });
+    expect(t.profileId).toBe(cfg.profiles[0].id);
+    await s.orch.waitIdle();
+  });
+
   it('createChat: chat de nivel 1 con el mensaje pendiente, encolado', async () => {
     const s = setupWithCoordinator(DONE);
     const t = s.actions.createChat({ projectId: 'demo', text: 'Plan para la web' });

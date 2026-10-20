@@ -2,12 +2,6 @@ import { useState } from 'react';
 import { MetricCard, useMetrics } from '../components/MetricCards';
 import { api } from '../api';
 
-const FUNNEL: [string, string][] = [
-  ['onboarding_iniciado', 'Onboarding iniciado'], ['permiso_tiempo_uso', 'Permiso concedido'], ['apps_elegidas', 'Apps elegidas'],
-  ['onboarding_completado', 'Onboarding completado'], ['paywall_visto', 'Paywall visto'], ['compra_iniciada', 'Compra iniciada'],
-  ['compra_completada', 'Compra completada'],
-];
-
 const KEYCHAIN_HELP: { account: string; text: string }[] = [
   { account: 'revenuecat', text: 'RevenueCat → Project settings → API keys: clave secreta v2 con permiso de solo lectura de Charts/métricas, nada más.' },
   { account: 'posthog', text: 'PostHog → Personal API keys: solo «Query: read» sobre tu proyecto.' },
@@ -39,7 +33,9 @@ export function Metrics() {
   if (!project || !view) return <div>{devicesLink}<p className="muted">Ningún proyecto tiene métricas en faro.config.ts.</p></div>;
 
   const ph = view.status.find((s) => s.source === 'posthog')?.lastOk;
-  const top = typeof ph?.data.onboarding_iniciado === 'number' ? ph.data.onboarding_iniciado : 0;
+  const funnel = view.funnel;
+  const first = funnel?.steps[0]?.event;
+  const top = first && typeof ph?.data[first] === 'number' ? (ph.data[first] as number) : 0;
 
   return (
     <div className="inbox">
@@ -51,11 +47,11 @@ export function Metrics() {
         {view.cards.length === 0 ? <p className="muted">Sin configurar: añade las claves del llavero (abajo) y pulsa «Actualizar ahora».</p>
           : <div className="metrics-row">{view.cards.map((c) => <MetricCard key={c.id} c={c} />)}</div>}
       </section>
-      <section>
-        <h2>Embudo de onboarding (7 días)</h2>
+      {funnel && <section>
+        <h2>{funnel.title} (7 días)</h2>
         {!ph ? <p className="muted">PostHog aún no ha dado datos.</p> : (
           <div className="funnel">
-            {FUNNEL.map(([e, label]) => {
+            {funnel.steps.map(({ event: e, label }) => {
               const n = typeof ph.data[e] === 'number' ? (ph.data[e] as number) : 0;
               const pct = top > 0 ? (n / top) * 100 : 0;
               return (
@@ -68,7 +64,7 @@ export function Metrics() {
             })}
           </div>
         )}
-      </section>
+      </section>}
       <section>
         <h2>Fuentes</h2>
         <ul className="routines">

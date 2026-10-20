@@ -10,6 +10,7 @@ export type { BacklogItem, PlanState };
 export interface ConfigView {
   projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean }[];
   profiles: { id: string; name: string; defaultLevel: Level }[];
+  coordinatorProfile: string;
 }
 
 export interface TaskDetail {
@@ -43,7 +44,10 @@ export interface RoutineView {
 export interface MetricsSourceStatus {
   source: SourceId; label: string; configured: boolean | null; last: Snapshot | null; lastOk: Snapshot | null;
 }
-export interface MetricsView { status: MetricsSourceStatus[]; cards: Card[]; keychain: Record<string, string> }
+export interface MetricsView {
+  status: MetricsSourceStatus[]; cards: Card[]; keychain: Record<string, string>;
+  funnel: { title: string; steps: { event: string; label: string }[] } | null;
+}
 
 export interface AsoFicha {
   name: string | null; subtitle: string | null; keywords: string | null;
