@@ -55,9 +55,15 @@ export class MetricsCollector {
       timer = setTimeout(() => { ctrl.abort(); reject(new Error('Tiempo agotado')); }, this.d.timeoutMs ?? 30_000);
     });
     try {
-      const res = await Promise.race([source.collect({ config, secret, fetch: f, now: at }), timeout]);
+      const knownDownloadDays = this.d.store.downloadDays(projectId, new Date(at.getTime() - 91 * 86_400_000).toISOString().slice(0, 10));
+      const res = await Promise.race([source.collect({ config, secret, fetch: f, now: at, knownDownloadDays }), timeout]);
       this.configured.set(`${projectId}:${source.id}`, res.configured);
-      if (res.configured) this.d.store.addSnapshot(projectId, source.id, true, res.data ?? {}, null, at);
+      if (res.configured) {
+        // Las descargas por día y país van a su tabla; la foto solo guarda valores escalares.
+        const { downloads_by_day: byDay, ...scalars } = res.data ?? {};
+        if (Array.isArray(byDay)) for (const d of byDay) this.d.store.upsertDailyDownloads(projectId, d.day, d.rows);
+        this.d.store.addSnapshot(projectId, source.id, true, scalars as Snapshot['data'], null, at);
+      }
     } catch (e) {
       this.configured.set(`${projectId}:${source.id}`, true);
       const msg = redact(e instanceof Error ? e.message : String(e), seen);

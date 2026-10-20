@@ -361,3 +361,18 @@ describe('estadísticas y gasto', () => {
     expect(store.listTasks(undefined, { limit: 1, offset: 0, newestFirst: true }).map((t) => t.id)).toEqual([ids[3]]);
   });
 });
+
+describe('descargas por día y país', () => {
+  it('upsertDailyDownloads reemplaza el día entero y no duplica', () => {
+    store.upsertDailyDownloads('demo', '2026-10-13', [{ country: 'ES', units: 5 }, { country: 'US', units: 3 }]);
+    store.upsertDailyDownloads('demo', '2026-10-13', [{ country: 'ES', units: 6 }]);
+    store.upsertDailyDownloads('demo', '2026-10-12', [{ country: 'ES', units: 1 }]);
+    store.upsertDailyDownloads('otro', '2026-10-13', [{ country: 'ES', units: 99 }]);
+    expect(store.dailyDownloads('demo', '2026-10-01', '2026-10-31')).toEqual([
+      { day: '2026-10-12', country: 'ES', units: 1 }, { day: '2026-10-13', country: 'ES', units: 6 },
+    ]);
+    expect(store.dailyDownloads('demo', '2026-10-13', '2026-10-13')).toHaveLength(1);
+    expect([...store.downloadDays('demo', '2026-10-13')]).toEqual(['2026-10-13']);
+    expect(store.downloadDays('demo', '2026-10-01')).toEqual(new Set(['2026-10-12', '2026-10-13']));
+  });
+});

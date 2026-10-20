@@ -2,7 +2,7 @@ import { generateKeyPairSync, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { appstoreSource } from '../src/server/metrics/appstore';
+import { appstoreSource, unitsByCountry } from '../src/server/metrics/appstore';
 import { funnelQuery, posthogSource } from '../src/server/metrics/posthog';
 import { revenuecatSource } from '../src/server/metrics/revenuecat';
 import type { MetricsConfig, SourceContext } from '../src/server/metrics/types';
@@ -11,10 +11,10 @@ const fixture = (n: string) => readFileSync(new URL(`./fixtures/metrics/${n}`, i
 type Call = { url: string; init?: RequestInit };
 const NOW = new Date('2026-10-15T10:00:00Z');
 
-function ctx(config: MetricsConfig, secrets: Record<string, string>, respond: (c: Call) => Response): { c: SourceContext; calls: Call[] } {
+function ctx(config: MetricsConfig, secrets: Record<string, string>, respond: (c: Call) => Response, known: Set<string> = new Set()): { c: SourceContext; calls: Call[] } {
   const calls: Call[] = [];
   const f = (async (url: string, init?: RequestInit) => { const call = { url: String(url), init }; calls.push(call); return respond(call); }) as unknown as typeof fetch;
-  return { c: { config, secret: async (n) => secrets[n] ?? null, fetch: f, now: NOW }, calls };
+  return { c: { config, secret: async (n) => secrets[n] ?? null, fetch: f, now: NOW, knownDownloadDays: known }, calls };
 }
 const json = (s: string, status = 200) => new Response(s, { status, headers: { 'content-type': 'application/json' } });
 
@@ -105,7 +105,7 @@ describe('App Store', () => {
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const p8 = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   const secrets = { 'asc-key-id': 'KID123', 'asc-issuer': 'issuer-uuid', 'asc-p8': p8 };
-  const report = gzipSync('Provider\tApple Identifier\tProduct Type Identifier\tUnits\nAPPLE\t1234567890\t1F\t5\nAPPLE\t1234567890\t1\t3\nAPPLE\t1234567890\tIA1\t9\nAPPLE\t999\t1F\t50\n');
+  const report = gzipSync('Provider\tApple Identifier\tProduct Type Identifier\tUnits\tCountry Code\nAPPLE\t1234567890\t1F\t5\tES\nAPPLE\t1234567890\t1\t3\tUS\nAPPLE\t1234567890\tIA1\t9\tES\nAPPLE\t999\t1F\t50\tES\nAPPLE\t1234567890\t1F\t2\tES\n');
 
   const routes = (extra: Partial<Record<'versions' | 'sales', () => Response>> = {}) => (c: Call): Response => {
     if (c.url.startsWith('https://itunes.apple.com/lookup')) return json(fixture('itunes-lookup.json'));
@@ -141,12 +141,39 @@ describe('App Store', () => {
   it('descargas = suma de unidades de filas de app (tipo que empieza por 1) de hace dos días (hora de Los Ángeles)', async () => {
     const { c, calls } = ctx({ ascAppId: '1234567890', ascVendorNumber: '88001234' }, secrets, routes());
     const r = await appstoreSource.collect(c);
-    expect(r.data?.downloads).toBe(8);
+    expect(r.data?.downloads).toBe(10);
     const url = calls.find((x) => x.url.includes('/salesReports'))!.url;
     expect(url).toContain('filter[vendorNumber]=88001234');
     expect(url).toContain('filter[reportDate]=2026-10-13');
     expect(url).toContain('filter[reportType]=SALES&filter[reportSubType]=SUMMARY');
     expect(url).toContain('filter[version]=1_0');
+  });
+
+  it('unitsByCountry agrupa por país solo filas de app con tipo 1*', () => {
+    const tsv = 'Apple Identifier\tProduct Type Identifier\tUnits\tCountry Code\n7\t1F\t5\tES\n7\t1\t3\tUS\n7\tIA1\t9\tES\n8\t1F\t50\tES\n7\t1F\t2\tES\n';
+    expect(unitsByCountry(tsv, '7')).toEqual([{ country: 'ES', units: 7 }, { country: 'US', units: 3 }]);
+    expect(unitsByCountry('Product Type Identifier\tUnits\n1F\t5\n', '7')).toBeNull();
+    expect(() => unitsByCountry('x\ty\n', '7')).toThrow('formato');
+  });
+
+  it('pide el día más reciente y como mucho 5 días que falten, del más reciente al más antiguo', async () => {
+    const known = new Set(['2026-10-12', '2026-10-10']);
+    const { c, calls } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, routes(), known);
+    const r = await appstoreSource.collect(c);
+    const days = calls.filter((x) => x.url.includes('/salesReports')).map((x) => /reportDate\]=([\d-]+)/.exec(x.url)![1]);
+    expect(days).toEqual(['2026-10-13', '2026-10-11', '2026-10-09', '2026-10-08', '2026-10-07', '2026-10-06']);
+    expect((r.data?.downloads_by_day as unknown[]).length).toBe(6);
+    expect((r.data?.downloads_by_day as { rows: unknown }[])[0].rows).toEqual([{ country: 'ES', units: 7 }, { country: 'US', units: 3 }]);
+  });
+
+  it('un 404 de un día viejo no anula los demás; downloads es el del día más reciente', async () => {
+    const sales = (c: Call) => (c.url.includes('reportDate]=2026-10-12') ? json('{}', 404) : new Response(report, { status: 200 }));
+    const { c } = ctx({ ascAppId: '1234567890', ascVendorNumber: '1' }, secrets, (call) => (call.url.includes('/salesReports') ? sales(call) : routes()(call)));
+    const r = await appstoreSource.collect(c);
+    expect(r.data?.downloads).toBe(10);
+    expect((r.data?.downloads_by_day as { day: string }[]).map((d) => d.day)).not.toContain('2026-10-12');
+    expect((r.data?.downloads_by_day as unknown[]).length).toBe(5);
+    expect(String(r.data?.notes)).toContain('404');
   });
 
   it('sin columna Apple Identifier no se cuentan descargas y queda nota', async () => {

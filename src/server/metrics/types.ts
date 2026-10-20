@@ -21,8 +21,11 @@ export interface SourceContext {
   secret: (n: SecretName) => Promise<string | null>;
   fetch: typeof fetch;
   now: Date;
+  /** Días de informe ya guardados en `daily_downloads` (los últimos 90), para no volver a pedirlos. */
+  knownDownloadDays: Set<string>;
 }
-export interface SourceResult { configured: boolean; data?: Record<string, number | string | null> }
+export interface DayDownloads { day: string; rows: { country: string; units: number }[] }
+export interface SourceResult { configured: boolean; data?: Record<string, number | string | null | DayDownloads[]> }
 export interface MetricSource { id: SourceId; label: string; collect(ctx: SourceContext): Promise<SourceResult> }
 export interface Snapshot {
   id: number; projectId: string; source: SourceId; takenAt: string; ok: boolean;

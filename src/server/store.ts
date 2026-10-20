@@ -81,6 +81,10 @@ CREATE TABLE IF NOT EXISTS metric_snapshots (
   ok INTEGER NOT NULL, data TEXT NOT NULL DEFAULT '{}', error TEXT
 );
 CREATE INDEX IF NOT EXISTS metric_snapshots_lookup ON metric_snapshots (project_id, source, taken_at);
+CREATE TABLE IF NOT EXISTS daily_downloads (
+  project_id TEXT NOT NULL, day TEXT NOT NULL, country TEXT NOT NULL, units INTEGER NOT NULL,
+  PRIMARY KEY (project_id, day, country)
+);
 `;
 
 type Row = Record<string, unknown>;
@@ -256,6 +260,25 @@ export class Store {
   listSnapshots(projectId: string, source: SourceId, limit: number): Snapshot[] {
     return (this.db.prepare('SELECT * FROM metric_snapshots WHERE project_id = ? AND source = ? ORDER BY taken_at DESC, id DESC LIMIT ?')
       .all(projectId, source, limit) as Row[]).map((r) => this.toSnapshot(r));
+  }
+
+  /** Sustituye por completo las descargas de ese día de informe. */
+  upsertDailyDownloads(projectId: string, day: string, rows: { country: string; units: number }[]): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM daily_downloads WHERE project_id = ? AND day = ?').run(projectId, day);
+      const ins = this.db.prepare('INSERT INTO daily_downloads (project_id, day, country, units) VALUES (?, ?, ?, ?)');
+      for (const r of rows) ins.run(projectId, day, r.country, r.units);
+    })();
+  }
+
+  downloadDays(projectId: string, fromDay: string): Set<string> {
+    const rows = this.db.prepare('SELECT DISTINCT day FROM daily_downloads WHERE project_id = ? AND day >= ?').all(projectId, fromDay) as Row[];
+    return new Set(rows.map((r) => r.day as string));
+  }
+
+  dailyDownloads(projectId: string, fromDay: string, toDay: string): { day: string; country: string; units: number }[] {
+    return (this.db.prepare('SELECT day, country, units FROM daily_downloads WHERE project_id = ? AND day >= ? AND day <= ? ORDER BY day, country')
+      .all(projectId, fromDay, toDay) as Row[]).map((r) => ({ day: r.day as string, country: r.country as string, units: r.units as number }));
   }
 
   close(): void {

@@ -109,6 +109,24 @@ describe('MetricsCollector', () => {
   });
 });
 
+describe('descargas por día', () => {
+  it('guarda downloads_by_day en daily_downloads, no en la foto, y pasa los días conocidos', async () => {
+    store.upsertDailyDownloads('demo', '2026-10-10', [{ country: 'ES', units: 1 }]);
+    const seen: Set<string>[] = [];
+    const c = new MetricsCollector({
+      store, config: config(), secret, now: () => new Date('2026-10-15T10:00:00Z'),
+      sources: [src('appstore', async (ctx) => {
+        seen.push(ctx.knownDownloadDays);
+        return { configured: true, data: { downloads: 4, downloads_by_day: [{ day: '2026-10-13', rows: [{ country: 'ES', units: 4 }] }] } };
+      })],
+    });
+    await c.collectAll();
+    expect(seen[0].has('2026-10-10')).toBe(true);
+    expect(store.dailyDownloads('demo', '2026-10-13', '2026-10-13')).toEqual([{ day: '2026-10-13', country: 'ES', units: 4 }]);
+    expect(store.latestSnapshot('demo', 'appstore', true)?.data).toEqual({ downloads: 4 });
+  });
+});
+
 describe('snapshotNear', () => {
   it('elige la foto ok más cercana a 7 días antes', () => {
     const now = new Date('2026-10-15T12:00:00Z');
