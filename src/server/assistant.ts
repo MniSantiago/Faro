@@ -104,7 +104,7 @@ interface CliResult { structured_output?: unknown; total_cost_usd?: unknown; is_
 
 /** Una frase → borrador de rutina. No guarda nada; el coste de la llamada sí queda en `assistant_calls`. */
 export async function draftRoutine(
-  d: { config: FaroConfig; store: Store; claudeBin: string; timeoutMs?: number; env?: NodeJS.ProcessEnv },
+  d: { config: FaroConfig; store: Store; claudeBin: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; /** Carpeta donde crear la temporal (por defecto, la del sistema). */ tmpBase?: string },
   projectId: string,
   description: string,
 ): Promise<RoutineDraft> {
@@ -117,8 +117,9 @@ export async function draftRoutine(
     throw new AssistantError('Límite diario del asistente alcanzado', 429);
   }
   inFlight.add(d.store);
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'faro-asistente-'));
+  let dir: string | null = null;
   try {
+    dir = mkdtempSync(path.join(d.tmpBase ?? os.tmpdir(), 'faro-asistente-'));
     const out = await run(d.claudeBin, assistantArgs(coordinator?.model, buildPrompt(d.config, project, description)), {
       cwd: dir, env: { ...process.env, ...agentEnv(project.remote), ...d.env }, timeoutMs: d.timeoutMs ?? TIMEOUT_MS,
     });
@@ -142,7 +143,7 @@ export async function draftRoutine(
     return validate(d.config, project, raw);
   } finally {
     inFlight.delete(d.store);
-    rmSync(dir, { recursive: true, force: true });
+    if (dir) rmSync(dir, { recursive: true, force: true });
   }
 }
 

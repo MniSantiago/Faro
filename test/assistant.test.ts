@@ -18,7 +18,7 @@ function setup(draft: object, env: Record<string, string> = {}) {
   writeFileSync(json, JSON.stringify(draft));
   const args = path.join(dir, 'args.jsonl');
   const fullEnv = { FAKE_JSON_RESULT: json, FAKE_ARGS_OUT: args, FAKE_CWD_OUT: path.join(dir, 'cwd.txt'), FAKE_JSON_COST: '0.0123', ...env };
-  const call = (over: { timeoutMs?: number } = {}, description = 'cada lunes revisa el estado') =>
+  const call = (over: { timeoutMs?: number; tmpBase?: string } = {}, description = 'cada lunes revisa el estado') =>
     draftRoutine({ config, store, claudeBin: config.claudeBin, env: fullEnv, ...over }, 'demo', description);
   return { config, store, call, args, cwd: path.join(dir, 'cwd.txt') };
 }
@@ -60,7 +60,7 @@ describe('asistente de rutinas', () => {
     const a = await setup({ ...valido, level: 3, context: 'aso' }).call();
     expect(a.level).toBe(2);
     expect(a.context).toBeNull();
-    await expect(setup({ ...valido, cron: 'cada lunes' }).call()).rejects.toThrow(/cron inválido/);
+    await expect(setup({ ...valido, cron: 'cada lunes' }).call()).rejects.toMatchObject({ message: expect.stringMatching(/cron inválido/), status: 422 });
   });
 
   it('CLI colgada: «El asistente tardó demasiado» y no deja carpeta temporal', async () => {
@@ -94,5 +94,11 @@ describe('asistente de rutinas', () => {
 
   it('perfil inventado y cron inválido son 422', async () => {
     await expect(setup({ ...valido, profileId: 'x' }).call()).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('si no se puede crear la carpeta temporal, se libera el bloqueo: el siguiente borrador no se rechaza', async () => {
+    const { call } = setup(valido);
+    await expect(call({ tmpBase: path.join(tmpDir(), 'no', 'existe') })).rejects.toThrow(/ENOENT/);
+    await expect(call()).resolves.toMatchObject({ profileId: 'dev' });
   });
 });
