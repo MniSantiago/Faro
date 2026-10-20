@@ -237,6 +237,16 @@ describe('homeSeries', () => {
     expect(s.note).toBe('Equivalente API');
   });
 
+  it('gasto: las llamadas del asistente salen como «Asistente» y no entran en el coste medio por ejecución', () => {
+    const { config, store, project } = setup({});
+    addRun(store, project, { at: daysAgo(1), cost: 2 });
+    store.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok) VALUES (?, ?, 1)').run(daysAgo(1).toISOString(), 1);
+    const s = homeSeries({ store, config }, 'demo', 'gasto', 7, NOW);
+    expect(s.current).toBe(3);
+    expect(s.breakdowns[1].rows).toEqual([{ label: 'Dev', value: 2 }, { label: 'Asistente', value: 1 }]);
+    expect(s.breakdowns[2].rows).toEqual([{ label: 'Coste medio por ejecución', value: 2 }]);
+  });
+
   it('conversión: sin desgloses (el embudo se pinta aparte)', () => {
     const { config, store } = setup({ metrics: METRICS });
     store.addSnapshot('demo', 'posthog', true, { trial: 10, paid: 2, conversion: 0.2 }, null, daysAgo(0, -1));

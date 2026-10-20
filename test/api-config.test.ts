@@ -298,6 +298,22 @@ describe('API de configuración', () => {
       });
     });
 
+    it('fallo de la CLI: local ve el detalle, un vinculado un mensaje genérico; ambos 502', async () => {
+      await conAsistente(async () => {
+        process.env.FAKE_JSON_SUBTYPE = 'error_max_budget_usd';
+        try {
+          const { local, remote } = setup();
+          const payload = { projectId: 'demo', description: 'algo' };
+          const l = await local({ method: 'POST', url: '/api/config/routines/draft', payload });
+          expect(l.statusCode).toBe(502);
+          expect(l.json().error).toContain('tope de gasto');
+          const r = await remote({ method: 'POST', url: '/api/config/routines/draft', payload });
+          expect(r.statusCode).toBe(502);
+          expect(r.json().error).toBe('El asistente no pudo redactar la rutina');
+        } finally { delete process.env.FAKE_JSON_SUBTYPE; }
+      });
+    });
+
     it('proyecto desconocido: 404; sin cabecera x-faro: rechazado', async () => {
       const { local } = setup();
       expect((await local({ method: 'POST', url: '/api/config/routines/draft', payload: { projectId: 'nope', description: 'x' } })).statusCode).toBe(404);

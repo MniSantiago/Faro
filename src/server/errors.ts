@@ -7,4 +7,6 @@ export class BadRequestError extends Error {}
 export class ForbiddenError extends Error {}
 
 /** El asistente de rutinas no pudo dar un borrador válido (la API responde 502 con el motivo). */
-export class AssistantError extends Error {}
+export class AssistantError extends Error {
+  constructor(message: string, readonly status: 502 | 422 | 429 = 502) { super(message); }
+}

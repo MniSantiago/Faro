@@ -1,5 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { draftRoutine } from '../src/server/assistant';
@@ -18,10 +17,10 @@ function setup(draft: object, env: Record<string, string> = {}) {
   const json = path.join(dir, 'draft.json');
   writeFileSync(json, JSON.stringify(draft));
   const args = path.join(dir, 'args.jsonl');
-  const fullEnv = { FAKE_JSON_RESULT: json, FAKE_ARGS_OUT: args, FAKE_JSON_COST: '0.0123', ...env };
+  const fullEnv = { FAKE_JSON_RESULT: json, FAKE_ARGS_OUT: args, FAKE_CWD_OUT: path.join(dir, 'cwd.txt'), FAKE_JSON_COST: '0.0123', ...env };
   const call = (over: { timeoutMs?: number } = {}, description = 'cada lunes revisa el estado') =>
     draftRoutine({ config, store, claudeBin: config.claudeBin, env: fullEnv, ...over }, 'demo', description);
-  return { config, store, call, args };
+  return { config, store, call, args, cwd: path.join(dir, 'cwd.txt') };
 }
 
 describe('asistente de rutinas', () => {
@@ -65,15 +64,35 @@ describe('asistente de rutinas', () => {
   });
 
   it('CLI colgada: «El asistente tardó demasiado» y no deja carpeta temporal', async () => {
-    const { call } = setup(valido, { FAKE_HANG: '1' });
+    const { call, cwd } = setup(valido, { FAKE_HANG: '1' });
     await expect(call({ timeoutMs: 200 })).rejects.toThrow('El asistente tardó demasiado');
-    const { readdirSync } = await import('node:fs');
-    expect(readdirSync(os.tmpdir()).filter((f) => f.startsWith('faro-asistente-'))).toEqual([]);
+    const used = readFileSync(cwd, 'utf8').trim();
+    expect(used).toContain('faro-asistente-');
+    expect(existsSync(used)).toBe(false);
   });
 
   it('error de la CLI: falla, y guarda el coste con ok = 0', async () => {
     const { call, store } = setup(valido, { FAKE_JSON_SUBTYPE: 'error_max_budget_usd' });
     await expect(call()).rejects.toThrow(/tope de gasto/);
     expect(store.db.prepare('SELECT ok FROM assistant_calls').all()).toEqual([{ ok: 0 }]);
+  });
+
+  it('un segundo borrador mientras hay uno en curso: «Ya hay un borrador en curso» (429)', async () => {
+    const { call } = setup(valido, { FAKE_HANG: '1' });
+    const first = call({ timeoutMs: 300 }).catch((e) => e);
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(call()).rejects.toMatchObject({ message: 'Ya hay un borrador en curso', status: 429 });
+    expect((await first).message).toBe('El asistente tardó demasiado');
+  });
+
+  it('50 intentos hoy: «Límite diario del asistente alcanzado» (429) sin lanzar la CLI', async () => {
+    const { call, store, args } = setup(valido);
+    for (let i = 0; i < 50; i++) store.recordAssistantCall(0.001, true);
+    await expect(call()).rejects.toMatchObject({ message: 'Límite diario del asistente alcanzado', status: 429 });
+    expect(existsSync(args)).toBe(false);
+  });
+
+  it('perfil inventado y cron inválido son 422', async () => {
+    await expect(setup({ ...valido, profileId: 'x' }).call()).rejects.toMatchObject({ status: 422 });
   });
 });

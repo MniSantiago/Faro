@@ -486,6 +486,11 @@ export class Store {
       .map((r) => ({ key: r.k as string, usd: r.usd as number, runs: r.n as number }));
   }
 
+  /** Intentos del asistente desde `fromIso` (con o sin éxito). */
+  assistantCallsSince(fromIso: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM assistant_calls WHERE at >= ?').get(fromIso) as { n: number }).n;
+  }
+
   /** Guarda lo que costó una llamada del asistente de rutinas (cuenta en el gasto de Faro). */
   recordAssistantCall(costUsd: number, ok: boolean): void {
     this.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok) VALUES (?, ?, ?)').run(now(), costUsd, ok ? 1 : 0);

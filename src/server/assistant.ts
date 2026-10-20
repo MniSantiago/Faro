@@ -14,6 +14,10 @@ export interface RoutineDraft {
 }
 
 const TIMEOUT_MS = 120_000;
+/** Tope de intentos por día local: el asistente cuesta dinero y el endpoint lo puede llamar un dispositivo vinculado. */
+export const DAILY_LIMIT = 50;
+/** Un borrador a la vez por almacén. */
+const inFlight = new WeakSet<Store>();
 const MAX_BUDGET_USD = '0.5';
 
 /** Forma de `RoutineDraft` para `--json-schema`. */
@@ -83,15 +87,16 @@ function run(bin: string, args: string[], opts: { cwd: string; env: NodeJS.Proce
     let stderr = '';
     let timedOut = false;
     const kill = (sig: NodeJS.Signals) => { try { process.kill(-child.pid!, sig); } catch { /* ya terminó */ } };
+    let hardKill: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       kill('SIGTERM');
-      setTimeout(() => kill('SIGKILL'), 2000).unref();
+      hardKill = setTimeout(() => kill('SIGKILL'), 2000);
     }, opts.timeoutMs);
     child.stdout.on('data', (b: Buffer) => { stdout = (stdout + b).slice(-2_000_000); });
     child.stderr.on('data', (b: Buffer) => { stderr = (stderr + b).slice(-100_000); });
     child.on('error', (e) => { stderr += e.message; });
-    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
+    child.on('close', (code) => { clearTimeout(timer); clearTimeout(hardKill); resolve({ code, stdout, stderr, timedOut }); });
   });
 }
 
@@ -106,14 +111,24 @@ export async function draftRoutine(
   const project = d.config.projects.find((p) => p.id === projectId);
   if (!project) throw new AssistantError('Proyecto desconocido');
   const coordinator = d.config.profiles.find((p) => p.id === (d.config.coordinatorProfile ?? 'coordinador'));
+  if (inFlight.has(d.store)) throw new AssistantError('Ya hay un borrador en curso', 429);
+  const today = new Date();
+  if (d.store.assistantCallsSince(new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()) >= DAILY_LIMIT) {
+    throw new AssistantError('Límite diario del asistente alcanzado', 429);
+  }
+  inFlight.add(d.store);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'faro-asistente-'));
   try {
     const out = await run(d.claudeBin, assistantArgs(coordinator?.model, buildPrompt(d.config, project, description)), {
       cwd: dir, env: { ...process.env, ...agentEnv(project.remote), ...d.env }, timeoutMs: d.timeoutMs ?? TIMEOUT_MS,
     });
-    if (out.timedOut) throw new AssistantError('El asistente tardó demasiado');
+    if (out.timedOut) {
+      d.store.recordAssistantCall(0, false); // cuenta como intento aunque no se sepa el coste
+      throw new AssistantError('El asistente tardó demasiado');
+    }
     let res: CliResult;
     try { res = JSON.parse(out.stdout) as CliResult; } catch {
+      d.store.recordAssistantCall(0, false);
       throw new AssistantError(`El asistente falló${out.stderr.trim() ? `: ${out.stderr.trim().split('\n').pop()!.slice(0, 200)}` : ''}`);
     }
     const cost = typeof res.total_cost_usd === 'number' ? res.total_cost_usd : 0;
@@ -126,6 +141,7 @@ export async function draftRoutine(
     d.store.recordAssistantCall(cost, true);
     return validate(d.config, project, raw);
   } finally {
+    inFlight.delete(d.store);
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -136,10 +152,10 @@ function validate(config: FaroConfig, project: ProjectConfig, raw: Partial<Routi
     return v.trim();
   };
   const profileId = str(raw.profileId, 'profileId');
-  if (!config.profiles.some((p) => p.id === profileId)) throw new AssistantError(`El asistente propuso un perfil que no existe: ${profileId}`);
+  if (!config.profiles.some((p) => p.id === profileId)) throw new AssistantError(`El asistente propuso un perfil que no existe: ${profileId}`, 422);
   const cron = typeof raw.cron === 'string' && raw.cron.trim() ? raw.cron.trim() : null;
   if (cron) {
-    try { new Cron(cron, { paused: true }); } catch { throw new AssistantError(`El asistente propuso un cron inválido: ${cron}`); }
+    try { new Cron(cron, { paused: true }); } catch { throw new AssistantError(`El asistente propuso un cron inválido: ${cron}`, 422); }
   }
   const level = (Number(raw.level) >= 2 ? 2 : 1) as 1 | 2;
   const context = raw.context && contextsOf(project).includes(raw.context) ? raw.context : null;

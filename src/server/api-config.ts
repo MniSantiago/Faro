@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { ApiDeps } from './api';
 import { canChange, editableBy, type Access, type Actor, type Change } from './config-access';
 import { draftRoutine } from './assistant';
-import { BadRequestError, ForbiddenError } from './errors';
+import { AssistantError, BadRequestError, ForbiddenError } from './errors';
 import { addSecretCommand, secretExists, type SecretName } from './keychain';
 import type { IgnoredOverride, LiveConfig, Origin, OverrideKind } from './overrides';
 import { nextRun } from './scheduler';
@@ -280,7 +280,16 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
   app.post('/api/config/routines/draft', async (req) => {
     const b = z.object({ projectId: text, description: text.max(2000) }).strict().parse(req.body);
     projectOrThrow(b.projectId);
-    return draftRoutine({ config, store: d.store, claudeBin: config.claudeBin }, b.projectId, b.description);
+    try {
+      return await draftRoutine({ config, store: d.store, claudeBin: config.claudeBin }, b.projectId, b.description);
+    } catch (e) {
+      // Un dispositivo vinculado no ve el detalle de la CLI (rutas, salida de error): queda en el log.
+      if (e instanceof AssistantError && e.status === 502 && !req.faroLocal) {
+        console.error('Asistente de rutinas', e.message);
+        throw new AssistantError('El asistente no pudo redactar la rutina');
+      }
+      throw e;
+    }
   });
 
   // Rutinas

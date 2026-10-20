@@ -279,14 +279,16 @@ export function homeSeries(d: HomeDeps, projectId: string, metric: HomeMetric, d
 
   if (metric === 'gasto') {
     const byProfile = d.store.spendBy('profile', from);
-    // Todas las ejecuciones con coste tienen perfil: sumar por perfil da el total de ejecuciones.
-    const runs = sum(byProfile.map((r) => r.runs));
+    // Las llamadas del asistente salen en «Por perfil» bajo «Asistente», pero no son ejecuciones de agentes:
+    // no entran en el coste medio por ejecución (ni su importe ni su número).
+    const agentRuns = byProfile.filter((r) => r.key !== 'Asistente');
+    const runs = sum(agentRuns.map((r) => r.runs));
     current = sum(values as number[]);
     const profileName = (id: string) => d.config.profiles.find((x) => x.id === id)?.name ?? id;
     breakdowns = [
       { title: 'Por rutina', rows: d.store.spendBy('routine', from).slice(0, TOP).map((r) => ({ label: routineName(d.config, r.key), value: r.usd })) },
       { title: 'Por perfil', rows: byProfile.map((r) => ({ label: profileName(r.key), value: r.usd })) },
-      { title: 'Resumen', rows: runs > 0 ? [{ label: 'Coste medio por ejecución', value: current / runs }] : [] },
+      { title: 'Resumen', rows: runs > 0 ? [{ label: 'Coste medio por ejecución', value: sum(agentRuns.map((r) => r.usd)) / runs }] : [] },
     ];
     note = 'Equivalente API';
   } else {
