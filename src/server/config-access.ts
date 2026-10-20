@@ -3,10 +3,15 @@ import type { FaroConfig } from './types';
 
 /** Quién pide el cambio: `local` = el Mac (`faroLocal`); si no, un dispositivo vinculado. */
 export type Actor = { local: boolean };
-/** `before` null = crear; `after` null = borrar o volver a la config. Ambos son el elemento entero. */
+/**
+ * `before` null = crear; `after` null = borrar o volver a la config. Ambos son el elemento entero.
+ * Si `after` es null por ser un «volver a la config», quien llama DEBE pasar `restored`: el elemento tal como
+ * queda tras la operación (la versión del archivo). Sin `restored` se entiende un borrado puro.
+ */
 export type Change = {
   kind: OverrideKind; id: string;
   before: Record<string, unknown> | null; after: Record<string, unknown> | null;
+  restored?: Record<string, unknown> | null;
 };
 export type Access = { ok: true } | { ok: false; reason: string };
 
@@ -19,11 +24,15 @@ const publishes = (e: Record<string, unknown> | null) => !!e && e.release !== un
 /**
  * Qué se puede cambiar y desde dónde. Lo comprueba el servidor; la web solo deshabilita los controles.
  * - Para todos: `release` de una rutina y `mcpConfig` de un perfil se editan en faro.config.ts.
+ * `config` es la config viva ya mezclada con los overrides, y `before` lo deriva quien llama de esa config
+ * (nunca del cuerpo de la petición).
  * - Desde un vinculado: solo rutinas y perfiles de nivel ≤ 2, sin tocar nada que ya sea de nivel 3-4,
  *   el perfil coordinador, perfiles usados por rutinas de nivel 3-4, ni rutinas con `release`.
  */
 export function canChange(actor: Actor, change: Change, config: FaroConfig): Access {
-  const { kind, id, before, after } = change;
+  const { kind, id, before } = change;
+  // Lo que quedaría tras el cambio: el elemento nuevo o, al volver a la config, el del archivo.
+  const after = change.after ?? change.restored ?? null;
   if (kind === 'routine' && after && publishes(after)) return no('Se edita en faro.config.ts');
   if (kind === 'profile' && after && after.mcpConfig !== before?.mcpConfig) return no('Se edita en faro.config.ts');
   if (actor.local) return OK;
@@ -50,18 +59,23 @@ export function canChange(actor: Actor, change: Change, config: FaroConfig): Acc
   return OK;
 }
 
-/** Para que la web sepa qué deshabilitar: ¿puede este actor editar (o borrar) el elemento tal como está ahora? */
-export function editableBy(actor: Actor, kind: OverrideKind, id: string, config: FaroConfig): Access {
-  let before: Record<string, unknown> | null = null;
-  if (kind === 'routine') {
-    for (const p of config.projects) {
-      const r = (p.routines ?? []).find(x => x.id === id);
-      if (r) { before = { ...r }; break; }
+/** Para que la web sepa qué deshabilitar: ¿puede este actor editar, borrar o volver a la config el elemento tal como está ahora? `fileConfig` = la config del archivo sin overrides. */
+export function editableBy(actor: Actor, kind: OverrideKind, id: string, config: FaroConfig, fileConfig?: FaroConfig): Access {
+  const find = (c: FaroConfig): Record<string, unknown> | null => {
+    if (kind === 'routine') {
+      for (const p of c.projects) {
+        const r = (p.routines ?? []).find(x => x.id === id);
+        if (r) return { ...r };
+      }
+    } else if (kind === 'profile') {
+      const p = c.profiles.find(x => x.id === id);
+      if (p) return { ...p };
     }
-  } else if (kind === 'profile') {
-    const p = config.profiles.find(x => x.id === id);
-    if (p) before = { ...p };
-  }
+    return null;
+  };
+  const before = find(config);
+  // Con la config del archivo, «volver a la config» restaura esa versión: también cuenta.
+  const restored = fileConfig ? find(fileConfig) : null;
   // Un elemento que no existe se trata como nuevo: sin `after` no hay nada que impida crearlo (salvo proyecto/generales).
-  return canChange(actor, { kind, id, before, after: null }, config);
+  return canChange(actor, { kind, id, before, after: null, restored }, config);
 }

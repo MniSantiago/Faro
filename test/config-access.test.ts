@@ -81,6 +81,33 @@ describe('canChange', () => {
   });
 });
 
+describe('volver a la config (restored)', () => {
+  it('vinculado: no puede restaurar una versión de nivel 3, con release o de defaultLevel 3', () => {
+    no(canChange(remote, ch({ before: routine({ level: 2 }), restored: routine({ level: 3 }) }), config));
+    no(canChange(remote, ch({ before: routine({ level: 2 }), restored: routine({ release: 'build' }) }), config));
+    no(canChange(remote, ch({ kind: 'profile', id: 'dev', before: { defaultLevel: 2 }, restored: { defaultLevel: 3 } }), config));
+  });
+  it('mcpConfig distinto al restaurar se edita en faro.config.ts, también en el Mac', () => {
+    expect(canChange(mac, ch({ kind: 'profile', id: 'dev', before: { defaultLevel: 1, mcpConfig: 'a' }, restored: { defaultLevel: 1 } }), config))
+      .toEqual({ ok: false, reason: 'Se edita en faro.config.ts' });
+  });
+  it('versión inofensiva: ok; sin restored es un borrado puro', () => {
+    expect(canChange(remote, ch({ before: routine({ level: 2 }), restored: routine({ level: 1 }) }), config)).toEqual({ ok: true });
+    expect(canChange(remote, ch({ before: routine({ level: 2 }), after: null }), config)).toEqual({ ok: true });
+  });
+  it('editableBy con fileConfig deshabilita el volver a la config peligroso', () => {
+    const file = {
+      ...config,
+      projects: [{ ...config.projects[0], routines: [{ ...config.projects[0].routines![0], level: 3 }] }],
+      profiles: config.profiles.map(p => (p.id === 'dev' ? { ...p, defaultLevel: 4 } : p)),
+    } as FaroConfig;
+    no(editableBy(remote, 'routine', 'r1', config, file));
+    no(editableBy(remote, 'profile', 'dev', config, file));
+    expect(editableBy(remote, 'routine', 'r1', config, config)).toEqual({ ok: true });
+    expect(editableBy(mac, 'routine', 'r1', config, file)).toEqual({ ok: true });
+  });
+});
+
 describe('editableBy', () => {
   it('Mac: todo', () => {
     expect(editableBy(mac, 'routine', 'r3', config)).toEqual({ ok: true });
