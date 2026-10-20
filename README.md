@@ -28,7 +28,7 @@ Faro is a self-hosted control panel for running [Claude Code](https://claude.com
 
 ## Requirements
 
-- **macOS.** The sandbox (`sandbox-exec`), secrets (Keychain via `security`) and autostart (`launchd`) are macOS-only for now.
+- **macOS recommended.** The agent sandbox (`sandbox-exec`), the Keychain and autostart (`launchd`) are macOS-only. On Linux Faro runs without the sandbox, and you pass secrets as environment variables.
 - **Node 22 or ≥24.** `better-sqlite3` crashes on Node 23. There's an `.nvmrc`, so run `nvm use` first.
 - **The `claude` CLI**, signed in (`claude login`). Agents run on your own Claude account and usage.
 - `gh`, signed in, if you use the GitHub integration.
@@ -52,19 +52,31 @@ Start at login on macOS: `scripts/install-launchd.sh` (uses the active Node; to 
 
 ## Customizing it
 
-Your whole setup lives in `faro.config.ts`:
+Your whole setup lives in `faro.config.ts` (see [`faro.config.example.ts`](faro.config.example.ts)):
 
-- `projects`: the repo path, base branch, task prefix (`DEM-1`…), `prepare` commands for each new worktree, `checks` a task must pass, `routines`, and optional `github`, `metrics`, `aso` and `release` blocks.
-- `profiles`: the roles and the instructions each agent gets.
-- `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts` (for remote access).
+| Option | What it does |
+|---|---|
+| `title` | Panel name shown in the UI (default `Faro`). |
+| `profiles` | Roles: instructions each agent gets, default level and timeout. |
+| `coordinatorProfile` | Profile used for chats and for splitting goals into subtasks (default `coordinador`). |
+| `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Which repo, which branch, and how tasks are numbered (`DEM-1`…). |
+| `projects[].prepare`, `exclude` | Commands run in each new worktree (e.g. symlink `node_modules`) and paths never committed. |
+| `projects[].checks` | Commands a task must pass before review; `whenChanged` limits one to a folder. |
+| `projects[].routines` | Recurring tasks with a cron schedule, profile, level and prompt (`{fecha}` is today's date). |
+| `projects[].github` | `ci` watches CI, `prs` merges through PRs, `ciProfile` picks who fixes a failing CI. |
+| `projects[].metrics` | RevenueCat, App Store Connect and PostHog; `posthogFunnel` defines your funnel steps, filters and conversion card. |
+| `projects[].aso`, `release` | App Store keyword tracking, and build/submit commands after merging (EAS by default). |
+| `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Server and runtime settings. |
 
-Secrets never go in the config. Faro reads them from the macOS Keychain (service `faro`), and the Metrics page shows the exact command to save each one:
+The menu only shows Metrics and ASO when a project uses them, and the Plan page only shows the store sections when the project has `release`.
+
+Secrets never go in the config. You can give each one in either of two ways (the Metrics page shows the exact command for each):
 
 ```bash
 security add-generic-password -U -s faro -a posthog -w
 ```
 
-Known limitation: the PostHog funnel uses fixed event names in `src/server/metrics/posthog.ts`. Change them to match your app.
+or, on any OS, as an environment variable when starting Faro (`FARO_SECRET_POSTHOG`, `FARO_SECRET_REVENUECAT`, `FARO_SECRET_ASC_KEY_ID`, `FARO_SECRET_ASC_ISSUER`, `FARO_SECRET_ASC_P8`, `FARO_SECRET_GITHUB_LECTURA`). Faro removes them from its environment at startup so agents and checks never inherit them.
 
 ## Data
 

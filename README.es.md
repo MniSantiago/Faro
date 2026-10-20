@@ -26,7 +26,7 @@ Faro es un panel de mando que instalas en tu máquina para orquestar agentes de 
 
 ## Requisitos
 
-- **macOS.** El sandbox (`sandbox-exec`), los secretos (llavero con `security`) y el arranque automático (`launchd`) son solo de macOS de momento.
+- **Mejor en macOS.** El sandbox de los agentes (`sandbox-exec`), el llavero y el arranque automático (`launchd`) son solo de macOS. En Linux Faro funciona sin sandbox y los secretos van en variables de entorno.
 - **Node 22 o ≥24.** `better-sqlite3` falla en Node 23. Hay un `.nvmrc`: ejecuta `nvm use` primero.
 - **La CLI `claude`** con la sesión iniciada (`claude login`). Los agentes usan tu propia cuenta y tu cuota de Claude.
 - `gh` con la sesión iniciada, si usas la integración con GitHub.
@@ -50,19 +50,31 @@ Arranque automático en el Mac: `scripts/install-launchd.sh` (usa el Node activo
 
 ## Personalizarlo
 
-Toda tu configuración vive en `faro.config.ts`:
+Toda tu configuración vive en `faro.config.ts` (mira [`faro.config.example.ts`](faro.config.example.ts)):
 
-- `projects`: ruta del repo, rama base, prefijo de las tareas (`DEM-1`…), comandos `prepare` para cada worktree nuevo, `checks` que tiene que pasar una tarea, `routines` y los bloques opcionales `github`, `metrics`, `aso` y `release`.
-- `profiles`: los roles y las instrucciones que recibe cada agente.
-- `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts` (para el acceso remoto).
+| Opción | Para qué sirve |
+|---|---|
+| `title` | Nombre del panel en la web (por defecto `Faro`). |
+| `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo. |
+| `coordinatorProfile` | Perfil de los chats y de dividir objetivos en subtareas (por defecto `coordinador`). |
+| `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Qué repo, qué rama y cómo se numeran las tareas (`DEM-1`…). |
+| `projects[].prepare`, `exclude` | Comandos para cada worktree nuevo (p. ej. enlazar `node_modules`) y rutas que nunca se commitean. |
+| `projects[].checks` | Comandos que tiene que pasar una tarea antes de revisión; `whenChanged` limita uno a una carpeta. |
+| `projects[].routines` | Tareas periódicas con cron, perfil, nivel y prompt (`{fecha}` es la fecha del día). |
+| `projects[].github` | `ci` vigila el CI, `prs` integra por PR y `ciProfile` elige quién arregla un CI roto. |
+| `projects[].metrics` | RevenueCat, App Store Connect y PostHog; `posthogFunnel` define las etapas, filtros y la tarjeta de conversión de tu embudo. |
+| `projects[].aso`, `release` | Keywords de la App Store y comandos de build y envío tras integrar (EAS por defecto). |
+| `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Servidor y ejecución. |
 
-Los secretos nunca van en la config. Faro los lee del llavero de macOS (servicio `faro`), y la página Métricas muestra el comando exacto para guardar cada uno:
+El menú solo enseña Métricas y ASO si algún proyecto las usa, y el Plan solo enseña lo de la tienda si el proyecto tiene `release`.
+
+Los secretos nunca van en la config. Puedes darlos de dos formas (la página Métricas muestra el comando exacto de cada uno):
 
 ```bash
 security add-generic-password -U -s faro -a posthog -w
 ```
 
-Limitación conocida: el embudo de PostHog usa nombres de eventos fijos en `src/server/metrics/posthog.ts`. Cámbialos por los de tu app.
+o, en cualquier sistema, como variable de entorno al arrancar Faro (`FARO_SECRET_POSTHOG`, `FARO_SECRET_REVENUECAT`, `FARO_SECRET_ASC_KEY_ID`, `FARO_SECRET_ASC_ISSUER`, `FARO_SECRET_ASC_P8`, `FARO_SECRET_GITHUB_LECTURA`). Faro las quita de su entorno al arrancar para que no las hereden los agentes ni las comprobaciones.
 
 ## Datos
 
