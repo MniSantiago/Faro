@@ -109,7 +109,7 @@ describe('Notifier', () => {
     bus.emitQueue(queue({ paused: true, reason: 'rate_limit' }));
     bus.emitQueue(queue({ paused: true, reason: 'rate_limit' }));
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ title: 'Cola en pausa: límite de uso', url: '/#/' }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ title: 'Cola en pausa: límite de uso', url: '/#/bandeja' }));
     bus.emitQueue(queue({ paused: false }));
     bus.emitQueue(queue({ paused: true, reason: 'auth' }));
     expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Cola en pausa: sesión de Claude caducada' }));
@@ -151,7 +151,7 @@ describe('Notifier', () => {
     store.addApproval(b.id, 'push', 'pending');
     bus.emitTask(b);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0]).toMatchObject({ title: 'Cambios sin subir en Demo', url: '/#/' });
+    expect(send.mock.calls[0][0]).toMatchObject({ title: 'Cambios sin subir en Demo', url: '/#/bandeja' });
     for (const t of [a, b]) for (const ap of store.listApprovals(t.id)) store.decideApproval(ap.id, 'approved');
     bus.emitTask(a);
     store.addApproval(a.id, 'push', 'pending');

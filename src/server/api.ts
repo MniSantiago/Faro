@@ -240,7 +240,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
       return { ok: true };
     });
     app.post('/api/push/test', async () => {
-      return push.send({ title: 'Faro funciona', body: 'Los avisos están activados en este dispositivo.', url: '/#/' });
+      return push.send({ title: 'Faro funciona', body: 'Los avisos están activados en este dispositivo.', url: '/#/bandeja' });
     });
   }
 

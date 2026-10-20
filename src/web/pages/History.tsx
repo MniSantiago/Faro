@@ -35,7 +35,7 @@ export function History() {
 
   return (
     <div className="inbox">
-      <a href="#/" className="back">← Bandeja</a>
+      <a href="#/bandeja" className="back">← Bandeja</a>
       <h1>Historial</h1>
       {items.length === 0 && !loading && !error && <p className="muted">Todavía no hay tareas terminadas.</p>}
       {items.length > 0 && (

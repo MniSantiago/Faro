@@ -76,12 +76,14 @@ export function chatList(tasks: Task[]): Task[] {
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }
 
-export type NavSection = 'bandeja' | 'chats' | 'rutinas' | 'metricas' | 'dispositivos' | 'plan' | 'aso';
+export type NavSection = 'inicio' | 'config' | 'bandeja' | 'chats' | 'rutinas' | 'metricas' | 'dispositivos' | 'plan' | 'aso';
 
 /** Entrada de la navegación que corresponde a la ruta; una tarea abierta va a «Chats» si es un chat. */
 export function navSection(route: string, tasks: Task[]): NavSection | null {
   const path = route.split('?')[0];
-  if (path === '/' || path === '/historial') return 'bandeja';
+  if (path === '/' || path === '/inicio' || path.startsWith('/inicio/')) return 'inicio';
+  if (path === '/config' || path.startsWith('/config/')) return 'config';
+  if (path === '/bandeja' || path === '/historial') return 'bandeja';
   if (path === '/chats' || path === '/chat/nuevo') return 'chats';
   if (path === '/rutinas') return 'rutinas';
   if (path === '/plan') return 'plan';

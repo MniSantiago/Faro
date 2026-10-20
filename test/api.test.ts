@@ -394,7 +394,7 @@ describe('API push', () => {
     expect(store.listPushSubscriptions()).toMatchObject([{ endpoint: sub.endpoint, deviceId: null }]);
     const t = await inj(app, { method: 'POST', url: '/api/push/test', headers: { 'x-faro': '1' } });
     expect(t.json()).toEqual({ sent: 1, failed: 0 });
-    expect(JSON.parse((sender.mock.calls[0] as unknown as [unknown, string])[1])).toMatchObject({ title: 'Faro funciona', url: '/#/' });
+    expect(JSON.parse((sender.mock.calls[0] as unknown as [unknown, string])[1])).toMatchObject({ title: 'Faro funciona', url: '/#/bandeja' });
     await inj(app, { method: 'POST', url: '/api/push/unsubscribe', payload: { endpoint: sub.endpoint } });
     expect(store.listPushSubscriptions()).toEqual([]);
   });

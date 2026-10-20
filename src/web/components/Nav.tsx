@@ -54,6 +54,8 @@ function useNavData() {
 
 function Icon({ name }: { name: NavSection | 'mas' }) {
   const paths: Record<string, string> = {
+    inicio: 'M4 11l8-7 8 7M6 10v10h12V10M10 20v-5h4v5',
+    config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z',
     bandeja: 'M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z',
     chats: 'M5 5h14v10H9l-4 4z',
     rutinas: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
@@ -133,13 +135,16 @@ export function Nav({ route }: { route: string }) {
     <>
       <nav className="sidebar" aria-label="Navegación">
         <a href="#/" className="brand"><Logo size={26} />{show.title}</a>
-        <a href="#/" aria-current={cur('bandeja')}><Icon name="bandeja" /><span className="label">Bandeja</span>{badge}</a>
+        <a href="#/" aria-current={cur('inicio')}><Icon name="inicio" /><span className="label">Inicio</span></a>
+        <a href="#/bandeja" aria-current={cur('bandeja')}><Icon name="bandeja" /><span className="label">Bandeja</span>{badge}</a>
         <a href="#/chats" aria-current={cur('chats')}><Icon name="chats" /><span className="label">Chats</span>{dot}</a>
         <a href="#/plan" aria-current={cur('plan')}><Icon name="plan" /><span className="label">Plan</span></a>
         <a href="#/rutinas" aria-current={cur('rutinas')}><Icon name="rutinas" /><span className="label">Rutinas</span></a>
         {show.metrics && <a href="#/metricas" aria-current={cur('metricas')}><Icon name="metricas" /><span className="label">Métricas</span></a>}
         {show.aso && <a href="#/aso" aria-current={cur('aso')}><Icon name="aso" /><span className="label">ASO</span></a>}
+        <hr className="side-sep" />
         <a href="#/dispositivos" aria-current={cur('dispositivos')}><Icon name="dispositivos" /><span className="label">Dispositivos</span></a>
+        <a href="#/config" aria-current={cur('config')}><Icon name="config" /><span className="label">Configuración</span></a>
         <div className="side-actions">
           <a href="#/nueva" className="btn primary">Nueva tarea</a>
           <a href="#/chat/nuevo" className="btn">Nuevo chat</a>
@@ -147,7 +152,7 @@ export function Nav({ route }: { route: string }) {
         {spend && <p className="side-spend">Hoy {formatUsd(spend.today)}<span className="note">equivalente API; tu plan no lo cobra</span></p>}
       </nav>
       <nav className="tabbar" aria-label="Navegación">
-        <a href="#/" aria-current={cur('bandeja')}><span className="ico-wrap"><Icon name="bandeja" />{badge}</span>Bandeja</a>
+        <a href="#/" aria-current={cur('inicio')}><span className="ico-wrap"><Icon name="inicio" />{badge}</span>Inicio</a>
         <a href="#/chats" aria-current={cur('chats')}><span className="ico-wrap"><Icon name="chats" />{dot}</span>Chats</a>
         <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
         <PlusMenu route={route} />

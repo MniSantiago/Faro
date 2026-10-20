@@ -100,7 +100,7 @@ export class Notifier {
     if (this.pushNotified.has(projectId)) return;
     this.pushNotified.add(projectId);
     const name = this.d.config?.projects.find((p) => p.id === projectId)?.name ?? projectId;
-    this.notify(`Cambios sin subir en ${name}`, 'Súbelos todos de una vez desde la bandeja.', '/#/');
+    this.notify(`Cambios sin subir en ${name}`, 'Súbelos todos de una vez desde la bandeja.', '/#/bandeja');
   }
 
   private blockedTitle(task: Task): string {
@@ -114,6 +114,6 @@ export class Notifier {
     const reason = q.reason ?? 'manual';
     if (reason === this.pauseReason) return;
     this.pauseReason = reason;
-    this.notify(`Cola en pausa: ${PAUSE_LABEL[reason]}`, 'Las tareas esperan hasta que reanudes la cola.', '/#/');
+    this.notify(`Cola en pausa: ${PAUSE_LABEL[reason]}`, 'Las tareas esperan hasta que reanudes la cola.', '/#/bandeja');
   }
 }

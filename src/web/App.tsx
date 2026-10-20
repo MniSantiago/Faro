@@ -6,7 +6,9 @@ import { QueueBanner } from './components/QueueBanner';
 import { Aso } from './pages/Aso';
 import { Chats } from './pages/Chats';
 import { Devices } from './pages/Devices';
+import { Config } from './pages/Config';
 import { History } from './pages/History';
+import { Home } from './pages/Home';
 import { Inbox } from './pages/Inbox';
 import { Metrics } from './pages/Metrics';
 import { Login } from './pages/Login';
@@ -68,6 +70,9 @@ function Shell() {
             : route === '/chat/nuevo' ? <NewChat />
             : route === '/chats' ? <Chats />
             : route === '/historial' ? <History />
+            : route === '/bandeja' ? <Inbox />
+            : route === '/config' || route.startsWith('/config/') ? <Config />
+            : route === '/' || route === '/inicio' || route.startsWith('/inicio/') ? <Home />
             : <Inbox />}
         </main>
       </div>

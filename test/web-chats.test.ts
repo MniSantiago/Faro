@@ -98,7 +98,11 @@ describe('chatList', () => {
 describe('navSection', () => {
   const tasks = [chat('C1'), makeTask({ id: 'T1' })];
   it('asigna cada ruta a su entrada', () => {
-    expect(navSection('/', tasks)).toBe('bandeja');
+    expect(navSection('/', tasks)).toBe('inicio');
+    expect(navSection('/bandeja', tasks)).toBe('bandeja');
+    expect(navSection('/inicio/gasto', tasks)).toBe('inicio');
+    expect(navSection('/config', tasks)).toBe('config');
+    expect(navSection('/config/rutinas/x', tasks)).toBe('config');
     expect(navSection('/historial', tasks)).toBe('bandeja');
     expect(navSection('/chats', tasks)).toBe('chats');
     expect(navSection('/chat/nuevo', tasks)).toBe('chats');

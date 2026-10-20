@@ -250,6 +250,7 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .sidebar > a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); font-weight: 600; }
   .sidebar .label { flex: 1; }
   .sidebar .ico { width: 18px; height: 18px; }
+  .side-sep { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
   .side-actions { display: grid; gap: 8px; margin: 20px 0 0; }
   .side-actions .btn { text-align: center; }
   .side-spend { margin: 16px 8px 0; font-size: 13px; color: var(--muted); }
