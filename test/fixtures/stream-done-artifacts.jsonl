@@ -1,0 +1,7 @@
+{"type":"system","subtype":"hook_started","hook_id":"h1","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"system","subtype":"init","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","cwd":"/tmp","model":"claude-opus-5-5"}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":""},{"type":"text","text":"Creo el archivo."}]},"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"hola.txt","content":"hola\n"}}]},"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"File created successfully","is_error":false}]},"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792062600},"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"result","subtype":"success","is_error":false,"api_error_status":null,"result":"Listo.\n\n```faro-result\n{\"status\":\"done\",\"summary\":\"He creado hola.txt\",\"artifacts\":[\".faro/artifacts/\",\".faro/artifacts/diff.patch\"],\"question\":null}\n```","usage":{"input_tokens":12,"output_tokens":34},"permission_denials":[],"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}

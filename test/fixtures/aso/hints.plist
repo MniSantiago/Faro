@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0">
+  <dict>
+    <key>title</key>
+    <string>Suggestions</string>
+    <key>hints</key>
+    <array>
+      <dict>
+        <key>term</key>
+        <string>bloquear aplicaciones</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20aplicaciones</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear movil estudio</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20movil%20estudio</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear aplicaciones gratis</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20aplicaciones%20gratis</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear movil</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20movil</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear anuncios</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20anuncios</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear apps</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20apps</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear llamadas spam</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20llamadas%20spam</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear reels</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20reels</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear numeros ocultos</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20numeros%20ocultos</string>
+      </dict>
+      <dict>
+        <key>term</key>
+        <string>bloquear aplicaciones para estudiar</string>
+        <key>url</key>
+        <string>https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search?clientApplication=Software&amp;src=hint&amp;submit=edit&amp;term=bloquear%20aplicaciones%20para%20estudiar</string>
+      </dict>
+    </array>
+  </dict>
+</plist>

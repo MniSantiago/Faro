@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"result","subtype":"success","is_error":false,"api_error_status":null,"result":"No pude hacer push.\n\n```faro-result\n{\"status\":\"done\",\"summary\":\"push denegado\",\"artifacts\":[]}\n```","usage":{"input_tokens":3,"output_tokens":4},"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"git push origin main"}}],"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}

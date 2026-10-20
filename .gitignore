@@ -1,0 +1,5 @@
+node_modules
+dist/
+.superpowers/
+.DS_Store
+faro.config.ts

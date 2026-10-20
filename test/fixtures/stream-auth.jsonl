@@ -1,0 +1,1 @@
+{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":401,"result":"Invalid API key · Please run /login","usage":{"input_tokens":0,"output_tokens":0},"permission_denials":[],"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}

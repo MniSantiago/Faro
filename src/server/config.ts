@@ -1,0 +1,118 @@
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { Cron } from 'croner';
+import type { FaroConfig, ProfileConfig, ProjectConfig } from './types';
+
+export class ConfigError extends Error {}
+
+export function expandHome(p: string): string {
+  return p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+function firstDuplicate(xs: string[]): string | undefined {
+  return xs.find((x, i) => xs.indexOf(x) !== i);
+}
+
+const METRICS_KEYS = ['revenuecatProjectId', 'posthogHost', 'posthogProjectId', 'ascAppId', 'ascVendorNumber'];
+
+export function normalizeConfig(raw: FaroConfig): FaroConfig {
+  const projects = raw.projects.map((p) => ({
+    ...p,
+    repoPath: expandHome(p.repoPath),
+    worktreesDir: expandHome(p.worktreesDir),
+    ...(p.backlogFile ? { backlogFile: expandHome(p.backlogFile) } : {}),
+  }));
+  const dupProject = firstDuplicate(projects.map((p) => p.id));
+  if (dupProject) throw new ConfigError(`Proyecto duplicado: ${dupProject}`);
+  const dupPrefix = firstDuplicate(projects.map((p) => p.prefix));
+  if (dupPrefix) throw new ConfigError(`Prefijo duplicado: ${dupPrefix}`);
+  const dupProfile = firstDuplicate(raw.profiles.map((p) => p.id));
+  if (dupProfile) throw new ConfigError(`Perfil duplicado: ${dupProfile}`);
+  for (const p of raw.profiles) {
+    if (![1, 2, 3, 4].includes(p.defaultLevel)) {
+      throw new ConfigError(`Nivel inválido en el perfil ${p.id}: ${p.defaultLevel}`);
+    }
+    if (!(p.timeoutMinutes > 0)) throw new ConfigError(`Tiempo máximo inválido en el perfil ${p.id}`);
+  }
+  if (!(raw.maxConcurrentRuns >= 1)) throw new ConfigError('maxConcurrentRuns debe ser al menos 1');
+  const routines = projects.flatMap((p) => p.routines ?? []);
+  const dupRoutine = firstDuplicate(routines.map((r) => r.id));
+  if (dupRoutine) throw new ConfigError(`Rutina duplicada: ${dupRoutine}`);
+  for (const r of routines) {
+    if (!raw.profiles.some((p) => p.id === r.profileId)) throw new ConfigError(`Rutina ${r.id}: perfil desconocido ${r.profileId}`);
+    if (![1, 2, 3, 4].includes(r.level)) throw new ConfigError(`Nivel inválido en la rutina ${r.id}: ${r.level}`);
+    if (r.context !== undefined && r.context !== 'metrics' && r.context !== 'estado' && r.context !== 'aso') throw new ConfigError(`Rutina ${r.id}: context debe ser «metrics», «estado» o «aso»`);
+    if (r.cron) {
+      try { new Cron(r.cron, { paused: true }); } catch { throw new ConfigError(`Rutina ${r.id}: cron inválido «${r.cron}»`); }
+    }
+  }
+  for (const p of projects) {
+    const w = p.contextWindow;
+    if (w !== undefined && !(typeof w === 'number' && Number.isInteger(w) && w > 0)) {
+      throw new ConfigError(`Proyecto ${p.id}: contextWindow debe ser un entero positivo`);
+    }
+  }
+  for (const p of projects) {
+    const r = p.release;
+    if (r && !(r.cwd?.trim() && r.build?.trim() && r.submit?.trim())) throw new ConfigError(`Proyecto ${p.id}: release incompleto`);
+  }
+  for (const p of projects) {
+    const m = p.metrics;
+    if (!m) continue;
+    for (const [k, v] of Object.entries(m)) {
+      if (!METRICS_KEYS.includes(k)) throw new ConfigError(`Proyecto ${p.id}: metrics.${k} no es una clave conocida`);
+      if (v !== undefined && (typeof v !== 'string' || !v.trim())) throw new ConfigError(`Proyecto ${p.id}: metrics.${k} debe ser un texto no vacío`);
+    }
+    if (m.posthogHost) {
+      let u: URL | null = null;
+      try { u = new URL(m.posthogHost); } catch { /* inválida */ }
+      if (!u || u.protocol !== 'https:') throw new ConfigError(`Proyecto ${p.id}: metrics.posthogHost debe ser una URL https`);
+    }
+  }
+  for (const p of projects) {
+    const a = p.aso;
+    if (a) {
+      const bad = (msg: string) => new ConfigError(`Proyecto ${p.id}: aso.${msg}`);
+      if (typeof a.appId !== 'string' || !/^\d+$/.test(a.appId)) throw bad('appId debe ser numérico');
+      if (!Array.isArray(a.stores) || a.stores.length === 0) throw bad('stores debe tener al menos una tienda');
+      const dupStore = firstDuplicate(a.stores.map((s) => s.id));
+      if (dupStore) throw bad(`stores repite el id «${dupStore}»`);
+      for (const s of a.stores) {
+        if (typeof s.id !== 'string' || !s.id.trim()) throw bad('stores[].id debe ser un texto no vacío');
+        if (typeof s.country !== 'string' || !/^[a-z]{2}$/.test(s.country)) throw bad(`stores[${s.id}].country debe ser de 2 letras minúsculas`);
+        if (typeof s.storefront !== 'string' || !s.storefront.trim()) throw bad(`stores[${s.id}].storefront debe ser un texto no vacío`);
+        const f = s.fichaFile;
+        if (typeof f !== 'string' || !f.trim() || path.isAbsolute(f) || f.split(/[\\/]/).includes('..')) throw bad(`stores[${s.id}].fichaFile debe ser una ruta relativa sin «..»`);
+      }
+    }
+  }
+  for (const p of projects) {
+    for (const r of p.routines ?? []) {
+      if (r.context === 'aso' && !p.aso) throw new ConfigError(`Rutina ${r.id}: context «aso» necesita el bloque aso del proyecto`);
+      if (r.release && r.release !== 'none' && !p.release) throw new ConfigError(`Rutina ${r.id}: pide release pero el proyecto ${p.id} no lo configura`);
+    }
+  }
+  return { ...raw, dataDir: expandHome(raw.dataDir), projects, profiles: raw.profiles };
+}
+
+export async function loadConfig(file = path.resolve(process.env.FARO_CONFIG ?? 'faro.config.ts')): Promise<FaroConfig> {
+  if (!existsSync(file)) {
+    throw new ConfigError(`No existe ${file}: copia faro.config.example.ts a faro.config.ts (o apunta FARO_CONFIG a tu config).`);
+  }
+  const mod = (await import(pathToFileURL(file).href)) as { default: FaroConfig };
+  return normalizeConfig(mod.default);
+}
+
+export function getProject(c: FaroConfig, id: string): ProjectConfig {
+  const p = c.projects.find((x) => x.id === id);
+  if (!p) throw new ConfigError(`Proyecto desconocido: ${id}`);
+  return p;
+}
+
+export function getProfile(c: FaroConfig, id: string): ProfileConfig {
+  const p = c.profiles.find((x) => x.id === id);
+  if (!p) throw new ConfigError(`Perfil desconocido: ${id}`);
+  return p;
+}

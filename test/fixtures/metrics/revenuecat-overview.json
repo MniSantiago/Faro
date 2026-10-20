@@ -1,0 +1,1 @@
+{"object":"overview_metrics","metrics":[{"id":"mrr","name":"MRR","value":123.4,"unit":"$"},{"id":"active_trials","value":7},{"id":"active_subscriptions","value":42},{"id":"revenue","value":310.5},{"id":"new_customers","value":18},{"id":"active_users","value":900}]}

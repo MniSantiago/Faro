@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Necesito dos decisiones."}]},"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"result","subtype":"success","is_error":false,"api_error_status":null,"result":"```faro-result\n{\"status\":\"blocked\",\"summary\":\"Faltan dos datos\",\"questions\":[{\"id\":\"color\",\"text\":\"¿Qué color?\",\"options\":[\"Rojo\",\"Azul\"]},{\"id\":\"tono\",\"text\":\"¿Qué tono?\"}],\"artifacts\":[]}\n```","usage":{"input_tokens":5,"output_tokens":6},"permission_denials":[],"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}

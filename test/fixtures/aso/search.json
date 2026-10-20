@@ -1,0 +1,40 @@
+{
+ "resultCount": 5,
+ "results": [
+  {
+   "trackId": 1497465230,
+   "trackName": "Opal: Tiempo de Pantalla Focus",
+   "userRatingCount": 3213,
+   "averageUserRating": 4.68939,
+   "version": "4.20"
+  },
+  {
+   "trackId": 1645639057,
+   "trackName": "Refocus: Bloquear Aplicaciones",
+   "userRatingCount": 572,
+   "averageUserRating": 4.68706,
+   "version": "2.1.30"
+  },
+  {
+   "trackId": 1459096306,
+   "trackName": "Focus Plant: estudiar planta",
+   "userRatingCount": 8263,
+   "averageUserRating": 4.61151,
+   "version": "4.5.11"
+  },
+  {
+   "trackId": 6469686557,
+   "trackName": "Bloqueo De Aplicaciones -",
+   "userRatingCount": 187,
+   "averageUserRating": 4.39037,
+   "version": "1.5.0"
+  },
+  {
+   "trackId": 1515753232,
+   "trackName": "AppBlock Bloquear Aplicaciones",
+   "userRatingCount": 944,
+   "averageUserRating": 4.57733,
+   "version": "4.13.4"
+  }
+ ]
+}
