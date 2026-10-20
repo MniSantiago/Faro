@@ -648,3 +648,34 @@ describe('API de ASO', () => {
     expect(done).toBe(true);
   });
 });
+
+describe('API de la home', () => {
+  it('GET /api/home: 400 sin proyecto, 404 si no existe; sin metrics ni plan, gasto y semana', async () => {
+    const { app } = setup();
+    expect((await inj(app, { method: 'GET', url: '/api/home' })).statusCode).toBe(400);
+    expect((await inj(app, { method: 'GET', url: '/api/home?project=nope' })).statusCode).toBe(404);
+    const r = await inj(app, { method: 'GET', url: '/api/home?project=demo' });
+    expect(r.statusCode).toBe(200);
+    const v = r.json();
+    expect(v.headline).toMatchObject({ text: 'Todo en orden', needCount: 0 });
+    expect(v.tiles.map((t: { metric: string; configured: boolean }) => [t.metric, t.configured]))
+      .toEqual([['descargas', false], ['conversion', false], ['mrr', false], ['gasto', true]]);
+    expect(v.tiles[3].value).toBe(0);
+    expect(v.health).toEqual([]);
+    expect(v.week.map((w: { label: string }) => w.label)).toEqual(['Tareas integradas', 'Ejecuciones de agentes']);
+  });
+
+  it('GET /api/home/series valida la cifra y los días', async () => {
+    const { app } = setup();
+    const get = (q: string) => inj(app, { method: 'GET', url: `/api/home/series?${q}` });
+    expect((await get('metric=gasto&days=7')).statusCode).toBe(400);
+    expect((await get('project=demo&metric=otra&days=7')).statusCode).toBe(400);
+    expect((await get('project=demo&metric=gasto&days=15')).statusCode).toBe(400);
+    expect((await get('project=demo&metric=gasto')).statusCode).toBe(400);
+    expect((await get('project=nope&metric=gasto&days=7')).statusCode).toBe(404);
+    const r = await get('project=demo&metric=gasto&days=30');
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ metric: 'gasto', days: 30, current: 0, breakdown: [] });
+    expect(r.json().points).toHaveLength(30);
+  });
+});

@@ -6,6 +6,7 @@ import { z, ZodError } from 'zod';
 import { ActionError, BadRequestError, type ReviewActions } from './actions';
 import { addSecretCommand } from './keychain';
 import { buildCards } from './metrics/summary';
+import { homeSeries, homeView } from './home';
 import type { AsoCollector } from './aso/collector';
 import { inFicha, fichaWords, normalizeKeyword, type CurrentFicha } from './aso/ficha';
 import { MIN_PRIOR_DAYS, rankWindow } from './aso/alerts';
@@ -76,6 +77,12 @@ const AsoCompetitorBody = z.object({
 const AsoDecisionBody = z.object({ decision: z.enum(['accepted', 'rejected']) });
 const AsoStoreBody = z.object({ project: z.string().min(1), store: z.string().min(1) });
 const DAY = 86_400_000;
+
+const HomeQuery = z.object({ project: z.string().min(1, 'Falta el proyecto') });
+const SeriesQuery = HomeQuery.extend({
+  metric: z.enum(['descargas', 'conversion', 'mrr', 'gasto']),
+  days: z.coerce.number().pipe(z.union([z.literal(7), z.literal(30), z.literal(90)])),
+});
 
 const PushSubBody = z.object({
   endpoint: z.string().max(1000).url().refine((u) => u.startsWith('https://'), 'El endpoint debe ser https'),
@@ -254,6 +261,20 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
     title: config.title ?? 'Faro',
   }));
+
+  // Home: titular, cifras, salud y semana de un proyecto; y la serie de una cifra para su detalle.
+  const homeProject = (projectId: string): string => {
+    if (!config.projects.some((p) => p.id === projectId)) throw new NotFoundError('Proyecto desconocido');
+    return projectId;
+  };
+  app.get('/api/home', async (req) => {
+    const q = HomeQuery.parse(req.query);
+    return homeView({ store, config, plan: d.plan }, homeProject(q.project), new Date());
+  });
+  app.get('/api/home/series', async (req) => {
+    const q = SeriesQuery.parse(req.query);
+    return homeSeries({ store, config }, homeProject(q.project), q.metric, q.days, new Date());
+  });
 
   app.get('/api/tasks', async (req) => {
     const { state, parent, limit, offset } = req.query as { state?: string; parent?: string; limit?: string; offset?: string };

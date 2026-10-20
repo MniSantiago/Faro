@@ -257,6 +257,12 @@ export class Store {
     return best ? this.toSnapshot(best) : null;
   }
 
+  /** Fotos correctas (ok) desde `fromIso`, de la más antigua a la más reciente. */
+  snapshotsSince(projectId: string, source: SourceId, fromIso: string): Snapshot[] {
+    return (this.db.prepare('SELECT * FROM metric_snapshots WHERE project_id = ? AND source = ? AND ok = 1 AND taken_at >= ? ORDER BY taken_at, id')
+      .all(projectId, source, fromIso) as Row[]).map((r) => this.toSnapshot(r));
+  }
+
   listSnapshots(projectId: string, source: SourceId, limit: number): Snapshot[] {
     return (this.db.prepare('SELECT * FROM metric_snapshots WHERE project_id = ? AND source = ? ORDER BY taken_at DESC, id DESC LIMIT ?')
       .all(projectId, source, limit) as Row[]).map((r) => this.toSnapshot(r));
@@ -446,6 +452,42 @@ export class Store {
       'SELECT COALESCE(SUM(cost_usd), 0) AS s FROM runs WHERE cost_usd IS NOT NULL AND started_at >= ?',
     ).get(from.toISOString()) as { s: number }).s;
     return { today: sum(startOfToday), week: sum(startOfWeek) };
+  }
+
+  // Las consultas de gasto van juntas: si se suma otra fuente de coste, se añade aquí a las tres.
+
+  /** Gasto equivalente por día local desde `fromIso`; solo los días con gasto, en orden. */
+  spendByDay(fromIso: string): { day: string; usd: number }[] {
+    return (this.db.prepare(`SELECT date(started_at, 'localtime') AS day, SUM(cost_usd) AS usd FROM runs
+      WHERE cost_usd IS NOT NULL AND started_at >= ? GROUP BY day ORDER BY day`).all(fromIso) as Row[])
+      .map((r) => ({ day: r.day as string, usd: r.usd as number }));
+  }
+
+  /** Gasto equivalente desde `fromIso` por rutina o por perfil de la tarea, del más caro al más barato; por rutina no cuentan las tareas sin rutina. */
+  spendBy(field: 'routine' | 'profile', fromIso: string): { key: string; usd: number; runs: number }[] {
+    const col = field === 'routine' ? 't.routine_id' : 't.profile_id';
+    return (this.db.prepare(`SELECT ${col} AS k, SUM(r.cost_usd) AS usd, COUNT(*) AS n FROM runs r JOIN tasks t ON t.id = r.task_id
+      WHERE r.cost_usd IS NOT NULL AND r.started_at >= ? AND ${col} IS NOT NULL GROUP BY k ORDER BY usd DESC, k`).all(fromIso) as Row[])
+      .map((r) => ({ key: r.k as string, usd: r.usd as number, runs: r.n as number }));
+  }
+
+  /** Ejecuciones de agentes empezadas desde `fromIso` (con o sin coste conocido). */
+  runCount(fromIso: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM runs WHERE started_at >= ?').get(fromIso) as { n: number }).n;
+  }
+
+  /**
+   * Última ejecución terminada de cada tarea de rutina del proyecto, si empezó desde `fromIso`; en orden de ejecución.
+   * `reason` es el motivo de bloqueo de la tarea, si lo tiene.
+   */
+  routineRuns(projectId: string, fromIso: string): { taskId: string; routineId: string; outcome: RunOutcome; endedAt: string; reason: string | null }[] {
+    return (this.db.prepare(`SELECT t.id, t.routine_id, t.blocked_reason, r.outcome, r.ended_at FROM runs r JOIN tasks t ON t.id = r.task_id
+      WHERE t.project_id = ? AND t.routine_id IS NOT NULL AND r.started_at >= ?
+        AND r.id = (SELECT MAX(id) FROM runs x WHERE x.task_id = t.id AND x.ended_at IS NOT NULL)
+      ORDER BY r.id`).all(projectId, fromIso) as Row[]).map((r) => ({
+      taskId: r.id as string, routineId: r.routine_id as string, outcome: r.outcome as RunOutcome,
+      endedAt: r.ended_at as string, reason: (r.blocked_reason as string | null) ?? null,
+    }));
   }
 
   listRuns(taskId: string): Run[] {
