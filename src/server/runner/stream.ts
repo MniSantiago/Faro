@@ -97,7 +97,8 @@ export function parseLine(line: string, initModel?: string): ParsedLine[] {
         kind: 'result',
         isError: o.is_error === true,
         subtype: String(o.subtype ?? ''),
-        text: typeof o.result === 'string' ? o.result : '',
+        // Los cortes (p. ej. por presupuesto) no traen `result`, sino `errors`.
+        text: typeof o.result === 'string' ? o.result : Array.isArray(o.errors) ? o.errors.filter((e: unknown) => typeof e === 'string').join('\n') : '',
         inputTokens: Number(o.usage?.input_tokens ?? 0),
         outputTokens: Number(o.usage?.output_tokens ?? 0),
         apiErrorStatus: typeof o.api_error_status === 'number' ? o.api_error_status : null,
@@ -127,6 +128,9 @@ export function classify(s: StreamSummary): { outcome: RunOutcome; faroResult: F
   if (s.cancelled) return { outcome: 'interrupted', faroResult: null, error: null };
   if (s.timedOut) return { outcome: 'timeout', faroResult: null, error: 'Tiempo máximo superado' };
   const r = s.result;
+  if (r?.subtype === 'error_max_budget_usd') {
+    return { outcome: 'budget', faroResult: null, error: `Se alcanzó el presupuesto máximo de la ejecución (${r.text || 'sin detalle'})` };
+  }
   const failed = !r || r.isError;
   const errText = r?.isError ? r.text : s.stderr;
   if (failed && (s.rateLimitRejected || r?.apiErrorStatus === 429 || LIMIT_RE.test(errText))) {

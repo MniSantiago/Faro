@@ -62,6 +62,21 @@ describe('buildClaudeArgs', () => {
     expect(a[a.indexOf('--mcp-config') + 1]).toBe('/x/mcp.json');
   });
 
+  it('añade --effort del perfil y --max-budget-usd (el de la ejecución manda sobre el del perfil)', () => {
+    const base = { sessionId: 's', resume: false, level: 2 as const, systemPrompt: 'S' };
+    const plain = buildClaudeArgs({ ...base, profile });
+    expect(plain).not.toContain('--effort');
+    expect(plain).not.toContain('--max-budget-usd');
+    const p2 = { ...profile, effort: 'medium' as const, maxBudgetUsd: 1.5 };
+    const a = buildClaudeArgs({ ...base, profile: p2 });
+    expect(a[a.indexOf('--effort') + 1]).toBe('medium');
+    expect(a[a.indexOf('--max-budget-usd') + 1]).toBe('1.5');
+    const b = buildClaudeArgs({ ...base, profile: p2, maxBudgetUsd: 0.75 });
+    expect(b[b.indexOf('--max-budget-usd') + 1]).toBe('0.75');
+    // Antes de las listas variádicas, que van al final.
+    expect(b.indexOf('--max-budget-usd')).toBeLessThan(b.indexOf('--allowedTools'));
+  });
+
   it('formatMessages lista los mensajes nuevos con su autor', () => {
     const c = (author: 'user' | 'faro', body: string) => ({ id: 1, taskId: 'X', author, body, createdAt: '', deliveredAt: null });
     expect(formatMessages([c('user', 'usa azul'), c('faro', 'DEM-3 está en revisión')])).toBe(

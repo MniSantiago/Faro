@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Cron } from 'croner';
-import type { FaroConfig, ProfileConfig, ProjectConfig } from './types';
+import { EFFORTS, type FaroConfig, type ProfileConfig, type ProjectConfig } from './types';
 import type { FunnelConfig } from './metrics/types';
 
 export class ConfigError extends Error {}
@@ -14,6 +14,12 @@ export function expandHome(p: string): string {
 
 function firstDuplicate(xs: string[]): string | undefined {
   return xs.find((x, i) => xs.indexOf(x) !== i);
+}
+
+function checkBudget(where: string, v: unknown): void {
+  if (v !== undefined && !(typeof v === 'number' && Number.isFinite(v) && v > 0)) {
+    throw new ConfigError(`${where}: maxBudgetUsd debe ser un número positivo`);
+  }
 }
 
 const METRICS_KEYS = ['revenuecatProjectId', 'posthogHost', 'posthogProjectId', 'ascAppId', 'ascVendorNumber'];
@@ -36,6 +42,16 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
       throw new ConfigError(`Nivel inválido en el perfil ${p.id}: ${p.defaultLevel}`);
     }
     if (!(p.timeoutMinutes > 0)) throw new ConfigError(`Tiempo máximo inválido en el perfil ${p.id}`);
+    if (p.effort !== undefined && !(EFFORTS as readonly string[]).includes(p.effort)) {
+      throw new ConfigError(`Perfil ${p.id}: effort debe ser low, medium, high, xhigh o max`);
+    }
+    checkBudget(`Perfil ${p.id}`, p.maxBudgetUsd);
+  }
+  for (const k of ['maxWaitMs', 'maxUsageLimitWaitMs'] as const) {
+    const v = raw.retryWatchdog?.[k];
+    if (v !== undefined && !(typeof v === 'number' && Number.isInteger(v) && v >= 0)) {
+      throw new ConfigError(`retryWatchdog.${k} debe ser un entero no negativo`);
+    }
   }
   if (!(raw.maxConcurrentRuns >= 1)) throw new ConfigError('maxConcurrentRuns debe ser al menos 1');
   if (raw.title !== undefined && !text(raw.title)) throw new ConfigError('title debe ser un texto no vacío');
@@ -53,6 +69,7 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
   for (const r of routines) {
     if (!raw.profiles.some((p) => p.id === r.profileId)) throw new ConfigError(`Rutina ${r.id}: perfil desconocido ${r.profileId}`);
     if (![1, 2, 3, 4].includes(r.level)) throw new ConfigError(`Nivel inválido en la rutina ${r.id}: ${r.level}`);
+    checkBudget(`Rutina ${r.id}`, r.maxBudgetUsd);
     if (r.context !== undefined && r.context !== 'metrics' && r.context !== 'estado' && r.context !== 'aso') throw new ConfigError(`Rutina ${r.id}: context debe ser «metrics», «estado» o «aso»`);
     if (r.cron) {
       try { new Cron(r.cron, { paused: true }); } catch { throw new ConfigError(`Rutina ${r.id}: cron inválido «${r.cron}»`); }

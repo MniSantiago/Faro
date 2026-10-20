@@ -102,6 +102,14 @@ describe('classify', () => {
     expect(s.resetsAt).toBe(1792062600);
   });
 
+  it('corte por presupuesto (--max-budget-usd) → budget con motivo claro, aunque salga con código 1', () => {
+    const s = summarize('stream-budget.jsonl', { exitCode: 1 });
+    expect(s.result).toMatchObject({ subtype: 'error_max_budget_usd', text: 'Reached maximum budget ($0.5)', costUsd: 0.5123 });
+    const c = classify(s);
+    expect(c).toMatchObject({ outcome: 'budget', faroResult: null });
+    expect(c.error).toBe('Se alcanzó el presupuesto máximo de la ejecución (Reached maximum budget ($0.5))');
+  });
+
   it('sesión caducada', () => {
     expect(classify(summarize('stream-auth.jsonl', { exitCode: 1 })).outcome).toBe('auth');
   });

@@ -16,6 +16,8 @@ export interface RoutineConfig {
   /** `metrics`: añade a la descripción las últimas fotos de métricas del proyecto.
    *  `estado`: añade las tareas de Faro, los pendientes, el último build, lo integrado sin enviar, el CI y los PR. */
   context?: 'metrics' | 'estado' | 'aso';
+  /** Tope de gasto por ejecución (`--max-budget-usd`); manda sobre el del perfil. */
+  maxBudgetUsd?: number;
 }
 export interface ReleaseConfig { cwd: string; build: string; submit: string; timeoutMinutes?: number }
 export interface RoutineRow {
@@ -24,7 +26,10 @@ export interface RoutineRow {
 }
 export type Level = 1 | 2 | 3 | 4;
 export type FinalAction = 'merge' | 'push' | 'eas' | 'publish';
-export type RunOutcome = 'done' | 'blocked' | 'error' | 'timeout' | 'rate_limited' | 'auth' | 'interrupted';
+export type RunOutcome = 'done' | 'blocked' | 'error' | 'timeout' | 'rate_limited' | 'auth' | 'interrupted' | 'budget';
+/** Niveles de `--effort` de la CLI. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type Effort = typeof EFFORTS[number];
 export type EventKind = 'system' | 'prompt' | 'message' | 'tool' | 'result' | 'error';
 export type ArtifactKind = 'diff' | 'check' | 'image' | 'video' | 'file';
 export type ApprovalState = 'pending' | 'approved' | 'rejected' | 'auto';
@@ -75,9 +80,26 @@ export interface ProfileConfig {
   name: string;
   instructions: string;
   model?: string;
+  /** Esfuerzo de razonamiento (`--effort`); si falta, el de la CLI. */
+  effort?: Effort;
+  /** Tope de gasto por ejecución (`--max-budget-usd`); al alcanzarlo, la tarea se bloquea con ese motivo. */
+  maxBudgetUsd?: number;
   defaultLevel: Level;
   timeoutMinutes: number;
   mcpConfig?: string;
+}
+
+/**
+ * Modo de reintento desatendido de la CLI (`CLAUDE_CODE_RETRY_WATCHDOG`): reintenta 429/529 con un tope de espera
+ * en vez de fallar enseguida, y corta si el límite de uso se reinicia más tarde de lo admitido (Faro pausa la cola).
+ */
+export interface RetryWatchdogConfig {
+  /** Por defecto, activado. */
+  enabled?: boolean;
+  /** Espera total máxima reintentando sobrecargas y límites (por defecto 5 min). */
+  maxWaitMs?: number;
+  /** Espera máxima a que se reinicie un límite de uso (por defecto 5 min). */
+  maxUsageLimitWaitMs?: number;
 }
 
 export interface FaroConfig {
@@ -98,6 +120,8 @@ export interface FaroConfig {
   title?: string;
   /** Perfil de las conversaciones y de dividir objetivos en subtareas (por defecto `coordinador`). */
   coordinatorProfile?: string;
+  /** Esperas de la CLI ante límites de uso y sobrecarga (ver RetryWatchdogConfig). */
+  retryWatchdog?: RetryWatchdogConfig;
   projects: ProjectConfig[];
   profiles: ProfileConfig[];
 }

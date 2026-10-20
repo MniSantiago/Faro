@@ -24,6 +24,8 @@ export interface RunInput {
   sandboxProfile?: string | null;
   /** Hay token de GitHub de solo lectura en `env`: se permite `gh` de lectura. */
   ghRead?: boolean;
+  /** Tope de gasto de esta ejecución (el de la rutina); si falta, el del perfil. */
+  maxBudgetUsd?: number;
 }
 
 export interface RunResult {
@@ -107,7 +109,7 @@ export class Runner {
 
     const args = buildClaudeArgs({
       sessionId: input.sessionId, resume: input.resume, level: input.level, profile: input.profile, systemPrompt: input.systemPrompt,
-      ghRead: input.ghRead,
+      ghRead: input.ghRead, maxBudgetUsd: input.maxBudgetUsd,
     });
     const [cmd, argv] = wrapSandbox(this.d.claudeBin, args, input.sandboxProfile);
     const child = spawn(cmd, argv, { cwd: input.cwd, env: { ...process.env, ...input.env, ...this.d.env }, stdio: ['pipe', 'pipe', 'pipe'] });

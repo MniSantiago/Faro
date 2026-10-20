@@ -43,6 +43,21 @@ describe('normalizeConfig', () => {
     expect(() => normalizeConfig(raw)).toThrow(ConfigError);
   });
 
+  it('perfiles: effort de la lista de la CLI y maxBudgetUsd positivo', () => {
+    const withP = (over: object) => normalizeConfig({ ...base(), profiles: [{ ...base().profiles[0], ...over }] });
+    expect(() => withP({ effort: 'medium', maxBudgetUsd: 2 })).not.toThrow();
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) expect(() => withP({ effort })).not.toThrow();
+    expect(() => withP({ effort: 'mucho' })).toThrow('Perfil ios: effort debe ser low, medium, high, xhigh o max');
+    expect(() => withP({ maxBudgetUsd: 0 })).toThrow('Perfil ios: maxBudgetUsd debe ser un número positivo');
+    expect(() => withP({ maxBudgetUsd: '2' })).toThrow('maxBudgetUsd');
+  });
+
+  it('retryWatchdog: esperas enteras no negativas', () => {
+    expect(() => normalizeConfig({ ...base(), retryWatchdog: { maxWaitMs: 60_000, maxUsageLimitWaitMs: 0 } })).not.toThrow();
+    expect(() => normalizeConfig({ ...base(), retryWatchdog: { maxWaitMs: -1 } })).toThrow('retryWatchdog.maxWaitMs debe ser un entero no negativo');
+    expect(() => normalizeConfig({ ...base(), retryWatchdog: { maxUsageLimitWaitMs: 1.5 } })).toThrow('retryWatchdog.maxUsageLimitWaitMs');
+  });
+
   it('getProject y getProfile lanzan ConfigError si no existen', () => {
     const c = normalizeConfig(base());
     expect(getProject(c, 'demo').prefix).toBe('DEM');
@@ -62,6 +77,8 @@ describe('normalizeConfig', () => {
     expect(() => withR([{ ...ok, level: 5 as never }])).toThrow('Nivel inválido');
     expect(() => withR([{ ...ok, context: 'metrics' }])).not.toThrow();
     expect(() => withR([{ ...ok, context: 'otra' as never }])).toThrow('context debe ser «metrics», «estado» o «aso»');
+    expect(() => withR([{ ...ok, maxBudgetUsd: 0.5 }])).not.toThrow();
+    expect(() => withR([{ ...ok, maxBudgetUsd: -1 }])).toThrow('Rutina r: maxBudgetUsd debe ser un número positivo');
   });
 
   it('release: completo, y las rutinas con release exigen que el proyecto lo tenga', () => {

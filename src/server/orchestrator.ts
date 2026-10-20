@@ -213,10 +213,12 @@ export class Orchestrator {
       this.emit(task);
       const sandbox = this.sandboxFor(project);
       const ghToken = project.github && this.d.ghReadToken ? await this.d.ghReadToken() : null;
+      const routine = task.routineId ? project.routines?.find((r) => r.id === task.routineId) : undefined;
       const running = this.d.runner.run({
         taskId, cwd: task.worktreePath!, sessionId, resume, prompt, displayPrompt: base,
         systemPrompt: buildSystemPrompt(profile, project, task.level, { chat: task.kind === 'chat', profiles: config.profiles, ghRead: !!ghToken }),
-        level: task.level, profile, env: agentEnv(project.remote, ghToken), sandboxProfile: sandbox, ghRead: !!ghToken,
+        level: task.level, profile, env: agentEnv(project.remote, ghToken, config.retryWatchdog), sandboxProfile: sandbox, ghRead: !!ghToken,
+        maxBudgetUsd: routine?.maxBudgetUsd,
       });
       // Después de registrar la ejecución: así `recover` sabe qué mensajes iban en ella (delivered_at ≥ inicio).
       store.markDelivered(pending.map((c) => c.id));
@@ -287,6 +289,10 @@ export class Orchestrator {
         return;
       case 'timeout':
         this.block(task.id, r.error ?? 'Tiempo máximo superado');
+        return;
+      case 'budget':
+        // Reintentar volvería a gastar: decide el usuario (subir el tope o continuar).
+        this.block(task.id, r.error ?? 'Se alcanzó el presupuesto máximo de la ejecución');
         return;
       case 'rate_limited':
         if (stillWorking()) this.emit(store.setState(task.id, 'queued'));

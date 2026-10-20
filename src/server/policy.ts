@@ -1,4 +1,4 @@
-import type { FinalAction, Level } from './types';
+import type { FinalAction, Level, RetryWatchdogConfig } from './types';
 
 /** Reglas que ningún agente puede usar: estas acciones solo las ejecuta Faro. */
 export const ALWAYS_DENIED = [
@@ -48,7 +48,10 @@ export const ALWAYS_DENIED = [
  * Entorno del proceso del agente: sin credenciales para push, GitHub ni EAS.
  * Barrera estructural: aunque una regla de prefijo se esquive, no hay credenciales ni destino de push.
  */
-export function agentEnv(remote: string, ghReadToken: string | null = null): Record<string, string> {
+/** Esperas por defecto del modo de reintento desatendido: por debajo del tiempo máximo de cualquier perfil. */
+export const RETRY_WATCHDOG_DEFAULT_MS = 5 * 60_000;
+
+export function agentEnv(remote: string, ghReadToken: string | null = null, watchdog: RetryWatchdogConfig = {}): Record<string, string> {
   return {
     GIT_CONFIG_COUNT: '5',
     GIT_CONFIG_KEY_0: `remote.${remote}.pushurl`,
@@ -73,6 +76,16 @@ export function agentEnv(remote: string, ghReadToken: string | null = null): Rec
     GH_PROMPT_DISABLED: '1',
     GH_NO_UPDATE_NOTIFIER: '1',
     EXPO_TOKEN: 'faro-sin-acceso',
+    // Reintentos con tope: sin él, una ejecución desatendida podría esperar horas a que se reinicie un límite de uso.
+    // Al cortar sale como límite de uso y Faro pausa la cola hasta el reinicio.
+    ...(watchdog.enabled === false ? {} : {
+      CLAUDE_CODE_RETRY_WATCHDOG: '1',
+      CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: String(watchdog.maxWaitMs ?? RETRY_WATCHDOG_DEFAULT_MS),
+      CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS: String(watchdog.maxUsageLimitWaitMs ?? RETRY_WATCHDOG_DEFAULT_MS),
+    }),
+    // Desde la 2.1.300 los subagentes «fork» vienen activados en -p: copian todo el contexto del agente y van en segundo
+    // plano (emiten un segundo `result`). Faro no los necesita; los subagentes normales siguen disponibles.
+    CLAUDE_CODE_FORK_SUBAGENT: '0',
   };
 }
 

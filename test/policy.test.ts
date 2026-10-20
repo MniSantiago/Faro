@@ -83,8 +83,23 @@ describe('agentEnv', () => {
       GH_PROMPT_DISABLED: '1',
       GH_NO_UPDATE_NOTIFIER: '1',
       EXPO_TOKEN: 'faro-sin-acceso',
+      CLAUDE_CODE_RETRY_WATCHDOG: '1',
+      CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: '300000',
+      CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS: '300000',
+      CLAUDE_CODE_FORK_SUBAGENT: '0',
     });
     expect(agentEnv('upstream')['GIT_CONFIG_KEY_0']).toBe('remote.upstream.pushurl');
+  });
+
+  it('las esperas del modo de reintento desatendido son configurables y se puede apagar', () => {
+    const e = agentEnv('origin', null, { maxWaitMs: 60_000, maxUsageLimitWaitMs: 0 });
+    expect(e).toMatchObject({
+      CLAUDE_CODE_RETRY_WATCHDOG: '1', CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: '60000', CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS: '0',
+    });
+    const off = agentEnv('origin', null, { enabled: false });
+    expect(off).not.toHaveProperty('CLAUDE_CODE_RETRY_WATCHDOG');
+    expect(off).not.toHaveProperty('CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS');
+    expect(off.CLAUDE_CODE_FORK_SUBAGENT).toBe('0');
   });
 
   it('git push con ese entorno falla y no crea la rama en el remoto; sin él, sí funciona', () => {

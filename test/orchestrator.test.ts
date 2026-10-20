@@ -480,6 +480,36 @@ describe('Orchestrator', () => {
   });
 });
 
+describe('Orchestrator · presupuesto', () => {
+  it('el corte por presupuesto bloquea la tarea con el motivo y no la reintenta', async () => {
+    const f = files();
+    const { store, orch, add } = setup({ FAKE_FIXTURES: fixture('stream-budget.jsonl'), FAKE_EXIT: '1', FAKE_COUNTER: f.counter });
+    const id = add();
+    await orch.waitIdle();
+    expect(store.getTask(id)).toMatchObject({ state: 'blocked', attempts: 0 });
+    expect(store.getTask(id).blockedReason).toBe('Se alcanzó el presupuesto máximo de la ejecución (Reached maximum budget ($0.5))');
+    expect(readFileSync(f.counter, 'utf8')).toBe('1');
+    expect(orch.queueState().paused).toBe(false);
+  });
+
+  it('pasa --max-budget-usd de la rutina, o el del perfil si la rutina no tiene', async () => {
+    const f = files();
+    const { store, orch, project, config } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt', FAKE_ARGS_OUT: f.args });
+    config.profiles[0].maxBudgetUsd = 3;
+    project.routines = [
+      { id: 'barata', name: 'Barata', profileId: 'dev', level: 2, title: 'T', prompt: 'P', maxBudgetUsd: 0.25 },
+      { id: 'normal', name: 'Normal', profileId: 'dev', level: 2, title: 'T', prompt: 'P' },
+    ];
+    for (const routineId of ['barata', 'normal']) {
+      const t = store.createTask(project, { title: routineId, description: '', profileId: 'dev', level: 2, routineId });
+      orch.enqueue(t.id);
+      await orch.waitIdle();
+    }
+    const budgets = readJsonl(f.args).map((a: string[]) => a[a.indexOf('--max-budget-usd') + 1]);
+    expect(budgets).toEqual(['0.25', '3']);
+  });
+});
+
 describe('Orchestrator · resultados tras una parada', () => {
   function withRunner(outcome: 'error' | 'rate_limited' | 'auth') {
     const repo = makeRepo();

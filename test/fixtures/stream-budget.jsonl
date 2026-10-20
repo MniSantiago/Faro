@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","model":"claude-haiku-5-5"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Empiezo a revisar el código."}],"usage":{"input_tokens":2,"cache_read_input_tokens":100,"cache_creation_input_tokens":0,"output_tokens":5}},"parent_tool_use_id":null,"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+{"type":"result","subtype":"error_max_budget_usd","is_error":true,"terminal_reason":"budget_exhausted","errors":["Reached maximum budget ($0.5)"],"total_cost_usd":0.5123,"usage":{"input_tokens":0,"output_tokens":0},"permission_denials":[],"session_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
