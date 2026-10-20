@@ -55,6 +55,11 @@ function canonical(v: unknown): string {
 }
 
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
+/**
+ * Igual al valor del archivo, contando dos textos iguales sin los espacios de alrededor: el API recorta los textos
+ * (zod `trim`) y el archivo suele traerlos con saltos de línea (plantillas); si no, cualquier guardado los taparía.
+ */
+const sameAsFile = (v: unknown, file: unknown) => same(v, file) || (typeof v === 'string' && typeof file === 'string' && v.trim() === file.trim());
 
 function findElement(c: FaroConfig, kind: OverrideKind, id: string): Obj | undefined {
   if (kind === 'general') return id === 'general' ? (c as unknown as Obj) : undefined;
@@ -211,7 +216,7 @@ export class LiveConfig {
     const wanted = patch(patch(clone(fileFields), prev?.origin === 'file' ? prev.data : {}), omit(value, skip));
     const diff: Obj = {};
     for (const k of new Set([...Object.keys(fileFields), ...Object.keys(wanted)])) {
-      if (same(wanted[k], fileFields[k]) || same(wanted[k], fileN[k])) continue;
+      if (sameAsFile(wanted[k], fileFields[k]) || sameAsFile(wanted[k], fileN[k])) continue;
       diff[k] = wanted[k] ?? null;
     }
     return this.commit(kind, id, Object.keys(diff).length ? { ...base, origin: 'file', data: diff } : null);

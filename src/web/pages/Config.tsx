@@ -27,14 +27,21 @@ export function Config({ route }: { route: string }) {
   const dirty = useRef(false);
   const onDirty = useCallback((d: boolean) => { dirty.current = d; }, []);
 
-  const load = useCallback(() => {
-    api.configFull().then((c) => { setFull(c); setError(null); }).catch((e: Error) => setError(e.message));
-    // «Activada» es el interruptor de la página Rutinas (estado del programador, no de la config).
-    api.routines().then(setRows).catch(() => {});
-  }, []);
+  // «Activada» es el interruptor de la página Rutinas (estado del programador, no de la config).
+  const loadRows = useCallback(() => api.routines().then(setRows).catch(() => {}), []);
+  /** Recarga la config y los interruptores; nunca falla (el error queda en pantalla). */
+  const load = useCallback(async () => {
+    await Promise.all([
+      api.configFull().then((c) => { setFull(c); setError(null); }).catch((e: Error) => setError(e.message)),
+      loadRows(),
+    ]);
+  }, [loadRows]);
   useEffect(() => { authState().then((s) => setLocal(s.local)).catch(() => {}); }, []);
-  useEffect(() => subscribe((m) => { if (m.type === 'config' || (m.type === 'task' && m.task.routineId)) load(); }, load), [load]);
-  useEffect(load, [load]);
+  useEffect(() => subscribe((m) => {
+    if (m.type === 'config') void load();
+    else if (m.type === 'task' && m.task.routineId) void loadRows();
+  }, () => void load()), [load, loadRows]);
+  useEffect(() => { void load(); }, [load]);
 
   // Al cerrar o recargar la página con cambios sin guardar, el navegador avisa.
   useEffect(() => {
@@ -69,7 +76,7 @@ export function Config({ route }: { route: string }) {
 
 interface TabProps {
   full: ConfigFull; rows: RoutineView[]; id: string | null; local: boolean;
-  go: (hash: string) => void; onDirty: (d: boolean) => void; reload: () => void;
+  go: (hash: string) => void; onDirty: (d: boolean) => void; reload: () => Promise<void>;
 }
 
 function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
@@ -86,8 +93,10 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
   const selected: ConfigRoutineView | null = creating ? null : full.routines.find((r) => r.id === id) ?? (id ? null : full.routines[0] ?? null);
   const ignored = full.ignored.filter((i) => i.kind === 'routine');
 
-  const onSaved = (goTo: string | null, after?: SavedNotice) => {
-    reload();
+  // Se espera a tener la config nueva antes de cambiar de formulario: así no asoman los valores viejos
+  // ni «la rutina no existe» con una recién creada.
+  const onSaved = async (goTo: string | null, after?: SavedNotice) => {
+    await reload();
     setVersion((v) => v + 1);
     setNotice(goTo && (after?.taskId || after?.error) ? { routineId: goTo, ...after } : null);
     const hash = goTo ? `#/config/rutinas/${encodeURIComponent(goTo)}` : '#/config/rutinas';

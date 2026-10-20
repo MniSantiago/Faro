@@ -8,10 +8,10 @@ import { Bus } from '../src/server/bus';
 import { LiveConfig } from '../src/server/overrides';
 import { Scheduler } from '../src/server/scheduler';
 import { Store } from '../src/server/store';
-import type { BusMessage } from '../src/server/types';
+import type { BusMessage, RoutineConfig } from '../src/server/types';
 import { makeConfig, makeRepo, tmpDir } from './helpers';
 
-function setup(seed?: (store: Store) => void) {
+function setup(seed?: (store: Store) => void, extraRoutines: RoutineConfig[] = []) {
   const repo = makeRepo();
   const base = makeConfig(repo);
   const raw = makeConfig(repo, {
@@ -22,6 +22,7 @@ function setup(seed?: (store: Store) => void) {
       routines: [
         { id: 'diaria', name: 'Diaria', cron: '0 9 * * *', profileId: 'dev', level: 1, title: 'Diaria {fecha}', prompt: 'Revisa' },
         { id: 'despliegue', name: 'Despliegue', cron: '0 6 * * 1', profileId: 'ops', level: 3, title: 'Despliegue', prompt: 'Integra' },
+        ...extraRoutines,
       ],
     }],
     profiles: [
@@ -57,6 +58,21 @@ const nueva = { projectId: 'demo', name: 'Revisión de dependencias', title: 'De
 const full = async (inj: (o: InjectOptions) => Promise<LightMyRequestResponse>) => (await inj({ method: 'GET', url: '/api/config/full' })).json();
 
 describe('API de configuración', () => {
+  it('un texto del archivo con espacios alrededor no cuenta como cambio: solo se tapa lo que cambia', async () => {
+    const plantilla: RoutineConfig = { id: 'resumen', name: ' Resumen ', cron: '0 9 * * 1', profileId: 'dev', level: 1, title: 'Resumen {fecha}\n', prompt: '\n  Resume…\n' };
+    const { local, store } = setup(undefined, [plantilla]);
+    const solo = await local({ method: 'PUT', url: '/api/config/routines/resumen', payload: { level: 2 } });
+    expect(solo.statusCode).toBe(200);
+    expect(solo.json().overridden).toEqual(['level']);
+    // Como lo manda la web: todos los campos editables, con los textos tal cual vienen del archivo.
+    const entero = await local({ method: 'PUT', url: '/api/config/routines/resumen', payload: {
+      name: plantilla.name, title: plantilla.title, prompt: plantilla.prompt, cron: plantilla.cron, profileId: 'dev', level: 2, context: null, maxBudgetUsd: null,
+    } });
+    expect(entero.json().overridden).toEqual(['level']);
+    expect(entero.json().prompt).toBe('\n  Resume…\n');
+    expect(store.listOverrides().map((o) => o.data)).toEqual([{ level: 2 }]);
+  });
+
   it('crear rutina en local: 200, id del nombre (único) y aparece en /api/routines; emite «config»', async () => {
     const { local, messages, store } = setup();
     const r = await local({ method: 'POST', url: '/api/config/routines', payload: nueva });

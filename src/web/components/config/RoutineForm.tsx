@@ -1,8 +1,9 @@
 import { Cron } from 'croner';
 import { useEffect, useRef, useState } from 'react';
-import type { ConfigFull, ConfigRoutineView, RoutineContext, RoutineCreateBody } from '../../../server/api-config';
+import type { ConfigFull, ConfigRoutineView, RoutineContext } from '../../../server/api-config';
 import type { Level } from '../../../server/types';
 import { api, LEVEL_LABEL, type RoutineDraft } from '../../api';
+import { emptyForm, fmtBudget, formFromRoutine, sameForm, switchKind, timeOf, toBody, type RoutineFormState } from '../../routine-form';
 import { cronFromSchedule, scheduleError, scheduleFromCron, type Schedule } from '../../schedule';
 
 type Kind = Schedule['kind'];
@@ -17,67 +18,6 @@ const FIELD_LABEL: Record<string, string> = {
   name: 'Nombre', title: 'Título', cron: 'Cuándo', level: 'Nivel', profileId: 'Perfil', maxBudgetUsd: 'Tope de gasto',
   context: 'Contexto', prompt: 'Instrucciones',
 };
-
-/** Lo que edita el formulario. El tope de gasto va como texto para admitir la coma decimal. */
-export interface RoutineFormState {
-  name: string; title: string; schedule: Schedule; level: Level; profileId: string;
-  budget: string; context: RoutineContext | null; enabled: boolean; prompt: string;
-}
-
-const fmtBudget = (n: number | null | undefined) => (n == null ? '' : String(n).replace('.', ','));
-
-export function formFromRoutine(r: ConfigRoutineView, enabled: boolean): RoutineFormState {
-  return {
-    name: r.name, title: r.title, schedule: scheduleFromCron(r.cron ?? null), level: r.level, profileId: r.profileId,
-    budget: fmtBudget(r.maxBudgetUsd), context: r.context ?? null, enabled, prompt: r.prompt,
-  };
-}
-
-function emptyForm(profileId: string): RoutineFormState {
-  return { name: '', title: '', schedule: { kind: 'manual' }, level: 1, profileId, budget: '', context: null, enabled: false, prompt: '' };
-}
-
-/** El cuerpo que se manda (todos los campos editables; null = quitarlo) o el motivo por el que no se puede. */
-type Body = Omit<RoutineCreateBody, 'projectId'> & { cron: string | null; context: RoutineContext | null; maxBudgetUsd: number | null };
-function toBody(f: RoutineFormState): { ok: true; body: Body } | { ok: false; error: string } {
-  if (!f.name.trim()) return { ok: false, error: 'Falta el nombre' };
-  if (!f.title.trim()) return { ok: false, error: 'Falta el título de cada tarea' };
-  if (!f.prompt.trim()) return { ok: false, error: 'Faltan las instrucciones' };
-  if (!f.profileId) return { ok: false, error: 'Elige un perfil' };
-  const se = scheduleError(f.schedule);
-  if (se) return { ok: false, error: se };
-  let maxBudgetUsd: number | null = null;
-  if (f.budget.trim()) {
-    const n = Number(f.budget.trim().replace(',', '.').replace(/\s*\$$/, ''));
-    if (!Number.isFinite(n) || n <= 0) return { ok: false, error: 'El tope de gasto debe ser un número mayor que 0' };
-    maxBudgetUsd = n;
-  }
-  return {
-    ok: true,
-    body: { name: f.name, title: f.title, prompt: f.prompt, cron: cronFromSchedule(f.schedule), profileId: f.profileId, level: f.level, context: f.context, maxBudgetUsd },
-  };
-}
-
-/** Igualdad por lo que se guardaría (dos horarios iguales pueden ser objetos distintos). */
-function sameForm(a: RoutineFormState, b: RoutineFormState): boolean {
-  return a.name === b.name && a.title === b.title && a.prompt === b.prompt && a.level === b.level && a.profileId === b.profileId
-    && a.context === b.context && a.enabled === b.enabled && a.budget.trim() === b.budget.trim()
-    && a.schedule.kind === b.schedule.kind && cronFromSchedule(a.schedule) === cronFromSchedule(b.schedule);
-}
-
-const timeOf = (s: Schedule) => ('hour' in s ? { hour: s.hour, minute: s.minute } : { hour: 9, minute: 0 });
-
-/** Cambia de forma de horario conservando la hora; a «Personalizado» pasa el cron actual para retocarlo. */
-function switchKind(s: Schedule, kind: Kind): Schedule {
-  const t = timeOf(s);
-  switch (kind) {
-    case 'manual': return { kind };
-    case 'daily': return { kind, ...t };
-    case 'weekly': return { kind, days: s.kind === 'weekly' ? s.days : [1], ...t };
-    case 'monthly': return { kind, day: s.kind === 'monthly' ? s.day : 1, ...t };
-    case 'custom': return { kind, cron: scheduleError(s) ? '0 9 * * *' : cronFromSchedule(s) ?? '0 9 * * *' };
-  }
-}
 
 const hhmm = (s: Schedule) => { const t = timeOf(s); return `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`; };
 const fmtNext = (d: Date) => d.toLocaleString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -112,7 +52,7 @@ interface Props {
    * Tras guardar, crear, borrar o volver a la config. `goTo` = la rutina que hay que mostrar (null = la lista);
    * `taskId` = la tarea lanzada por «Probar ahora»; `error` = lo que falló después de crear la rutina.
    */
-  onSaved: (goTo: string | null, after?: SavedNotice) => void;
+  onSaved: (goTo: string | null, after?: SavedNotice) => Promise<void>;
 }
 
 export function RoutineForm({ full, routine, enabled, local, onDirty, onSaved }: Props) {
@@ -168,11 +108,11 @@ export function RoutineForm({ full, routine, enabled, local, onDirty, onSaved }:
       }
       const task = what === 'try' ? await api.runRoutine(id!) : null;
       onDirty(false);
-      onSaved(id, { taskId: task?.id });
+      await onSaved(id, { taskId: task?.id });
     } catch (e) {
       const message = (e as Error).message;
       // La rutina nueva ya existe aunque falle lo de después (activarla, lanzarla): se pasa a ella para no duplicarla.
-      if (!routine && id) { onDirty(false); onSaved(id, { error: message }); } else setError(message);
+      if (!routine && id) { onDirty(false); await onSaved(id, { error: message }); } else setError(message);
     } finally {
       setBusy(null);
     }
@@ -186,7 +126,7 @@ export function RoutineForm({ full, routine, enabled, local, onDirty, onSaved }:
     try {
       await api.deleteRoutineConfig(routine.id);
       onDirty(false);
-      onSaved(panel ? null : routine.id);
+      await onSaved(panel ? null : routine.id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
