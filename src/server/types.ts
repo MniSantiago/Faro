@@ -30,6 +30,9 @@ export type RunOutcome = 'done' | 'blocked' | 'error' | 'timeout' | 'rate_limite
 /** Niveles de `--effort` de la CLI. */
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = typeof EFFORTS[number];
+/** Qué ve el agente de la configuración del usuario (`buildClaudeArgs`). */
+export const ISOLATIONS = ['minimal', 'user'] as const;
+export type Isolation = typeof ISOLATIONS[number];
 export type EventKind = 'system' | 'prompt' | 'message' | 'tool' | 'result' | 'error';
 export type ArtifactKind = 'diff' | 'check' | 'image' | 'video' | 'file';
 export type ApprovalState = 'pending' | 'approved' | 'rejected' | 'auto';
@@ -84,6 +87,11 @@ export interface ProfileConfig {
   effort?: Effort;
   /** Tope de gasto por ejecución (`--max-budget-usd`); al alcanzarlo, la tarea se bloquea con ese motivo. */
   maxBudgetUsd?: number;
+  /**
+   * 'minimal' (por defecto): solo el CLAUDE.md y los ajustes del repo, los MCP de `mcpConfig` y las herramientas que el nivel permite.
+   * 'user': además la configuración del usuario (plugins, skills, hooks, memoria, CLAUDE.md global); los MCP siguen siendo solo los del perfil.
+   */
+  isolation?: Isolation;
   defaultLevel: Level;
   timeoutMinutes: number;
   mcpConfig?: string;

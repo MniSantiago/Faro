@@ -52,6 +52,12 @@ describe('normalizeConfig', () => {
     expect(() => withP({ maxBudgetUsd: '2' })).toThrow('maxBudgetUsd');
   });
 
+  it("perfiles: isolation 'minimal' o 'user'", () => {
+    const withP = (over: object) => normalizeConfig({ ...base(), profiles: [{ ...base().profiles[0], ...over }] });
+    for (const isolation of ['minimal', 'user']) expect(() => withP({ isolation })).not.toThrow();
+    expect(() => withP({ isolation: 'todo' })).toThrow("Perfil ios: isolation debe ser 'minimal' o 'user'");
+  });
+
   it('retryWatchdog: esperas enteras no negativas', () => {
     expect(() => normalizeConfig({ ...base(), retryWatchdog: { maxWaitMs: 60_000, maxUsageLimitWaitMs: 0 } })).not.toThrow();
     expect(() => normalizeConfig({ ...base(), retryWatchdog: { maxWaitMs: -1 } })).toThrow('retryWatchdog.maxWaitMs debe ser un entero no negativo');

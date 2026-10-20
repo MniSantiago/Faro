@@ -64,7 +64,7 @@ Your whole setup lives in `faro.config.ts` (see [`faro.config.example.ts`](faro.
 | Option | What it does |
 |---|---|
 | `title` | Panel name shown in the UI (default `Faro`). |
-| `profiles` | Roles: instructions each agent gets, default level and timeout; optional `model`, `effort` (`--effort`) and `maxBudgetUsd` (spending cap per run: when reached, the task is blocked). |
+| `profiles` | Roles: instructions each agent gets, default level and timeout; optional `model`, `effort` (`--effort`), `isolation` (`minimal` by default: agents load only the repo's own Claude setup, not your plugins, skills or global CLAUDE.md; `user` loads them too) and `maxBudgetUsd` (spending cap per run: when reached, the task is blocked). |
 | `coordinatorProfile` | Profile used for chats and for splitting goals into subtasks (default `coordinador`). |
 | `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Which repo, which branch, and how tasks are numbered (`DEM-1`…). |
 | `projects[].prepare`, `exclude` | Commands run in each new worktree (e.g. symlink `node_modules`) and paths never committed. |

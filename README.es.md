@@ -62,7 +62,7 @@ Toda tu configuración vive en `faro.config.ts` (mira [`faro.config.example.ts`]
 | Opción | Para qué sirve |
 |---|---|
 | `title` | Nombre del panel en la web (por defecto `Faro`). |
-| `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo; opcionales `model`, `effort` (`--effort`) y `maxBudgetUsd` (tope de gasto por ejecución: al alcanzarlo, la tarea se bloquea). |
+| `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo; opcionales `model`, `effort` (`--effort`), `isolation` (`minimal` por defecto: los agentes cargan solo la configuración de Claude del repo, no tus plugins, skills ni CLAUDE.md global; `user` también los carga) y `maxBudgetUsd` (tope de gasto por ejecución: al alcanzarlo, la tarea se bloquea). |
 | `coordinatorProfile` | Perfil de los chats y de dividir objetivos en subtareas (por defecto `coordinador`). |
 | `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Qué repo, qué rama y cómo se numeran las tareas (`DEM-1`…). |
 | `projects[].prepare`, `exclude` | Comandos para cada worktree nuevo (p. ej. enlazar `node_modules`) y rutas que nunca se commitean. |

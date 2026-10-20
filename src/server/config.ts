@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Cron } from 'croner';
-import { EFFORTS, type FaroConfig, type ProfileConfig, type ProjectConfig } from './types';
+import { EFFORTS, ISOLATIONS, type FaroConfig, type ProfileConfig, type ProjectConfig } from './types';
 import type { FunnelConfig } from './metrics/types';
 
 export class ConfigError extends Error {}
@@ -44,6 +44,9 @@ export function normalizeConfig(raw: FaroConfig): FaroConfig {
     if (!(p.timeoutMinutes > 0)) throw new ConfigError(`Tiempo máximo inválido en el perfil ${p.id}`);
     if (p.effort !== undefined && !(EFFORTS as readonly string[]).includes(p.effort)) {
       throw new ConfigError(`Perfil ${p.id}: effort debe ser low, medium, high, xhigh o max`);
+    }
+    if (p.isolation !== undefined && !(ISOLATIONS as readonly string[]).includes(p.isolation)) {
+      throw new ConfigError(`Perfil ${p.id}: isolation debe ser 'minimal' o 'user'`);
     }
     checkBudget(`Perfil ${p.id}`, p.maxBudgetUsd);
   }

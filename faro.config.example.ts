@@ -110,6 +110,13 @@ const config: FaroConfig = {
       // Opcionales por perfil: modelo, esfuerzo de razonamiento (--effort) y tope de gasto por ejecución en dólares
       // (--max-budget-usd; al alcanzarlo, la tarea se bloquea con ese motivo).
       // model: 'claude-opus-5-5', effort: 'high', maxBudgetUsd: 3,
+      // isolation: 'minimal' (default) loads only the repo's CLAUDE.md and settings, the profile's mcpConfig and the tools
+      // its level allows — none of your plugins, skills, hooks, auto-memory or ~/.claude/CLAUDE.md (much cheaper per run).
+      // 'user' also loads your user configuration from ~/.claude.
+      // isolation: 'minimal' (por defecto) carga solo el CLAUDE.md y los ajustes del repo, el mcpConfig del perfil y las
+      // herramientas de su nivel: nada de tus plugins, skills, hooks, memoria ni ~/.claude/CLAUDE.md (mucho más barato).
+      // 'user' carga además tu configuración de ~/.claude.
+      // isolation: 'minimal',
       defaultLevel: 2,
       timeoutMinutes: 45,
     },

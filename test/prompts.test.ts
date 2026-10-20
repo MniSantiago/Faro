@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeArgs } from '../src/server/runner/args';
 import { buildChatOpening, buildFollowUpPrompt, formatMessages, buildSystemPrompt, buildTaskPrompt } from '../src/server/runner/prompts';
@@ -34,10 +36,11 @@ describe('prompts', () => {
 describe('buildClaudeArgs', () => {
   it('sesión nueva', () => {
     const a = buildClaudeArgs({ sessionId: 's1', resume: false, level: 2, profile, systemPrompt: 'SYS' });
-    expect(a.slice(0, 11)).toEqual([
+    expect(a.slice(0, 9)).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk',
-      '--setting-sources', 'project,local', '--strict-mcp-config', '--model', 'opus',
+      '--setting-sources', 'project', '--strict-mcp-config',
     ]);
+    expect(a[a.indexOf('--model') + 1]).toBe('opus');
     expect(a).toEqual(expect.arrayContaining(['--append-system-prompt', 'SYS', '--session-id', 's1']));
     expect(a).not.toContain('--resume');
   });
@@ -55,6 +58,36 @@ describe('buildClaudeArgs', () => {
       expect(a[a.length - 2]).toBe('--disallowedTools');
       expect(a[a.length - 1]).toContain('Bash(git push:*)');
     }
+  });
+
+  const valueOf = (a: string[], flag: string) => a[a.indexOf(flag) + 1];
+
+  it('aislamiento mínimo por defecto: sin skills, ni memoria, ni CLAUDE.md global, y solo las herramientas permitidas', () => {
+    const a = buildClaudeArgs({ sessionId: 's', resume: false, level: 1, profile, systemPrompt: 'S' });
+    expect(valueOf(a, '--setting-sources')).toBe('project');
+    expect(a).toContain('--strict-mcp-config');
+    expect(a).toContain('--disable-slash-commands');
+    expect(JSON.parse(valueOf(a, '--settings'))).toEqual({
+      autoMemoryEnabled: false, claudeMdExcludes: [join(homedir(), '.claude', 'CLAUDE.md')],
+    });
+    expect(valueOf(a, '--tools')).toBe('Read,Glob,Grep,WebSearch,WebFetch,Bash');
+    const w = buildClaudeArgs({ sessionId: 's', resume: false, level: 2, profile, systemPrompt: 'S' });
+    expect(valueOf(w, '--tools')).toBe('Read,Glob,Grep,WebSearch,WebFetch,Bash,Edit,Write,NotebookEdit');
+    // Antes de las listas variádicas, que van al final.
+    expect(a.indexOf('--tools')).toBeLessThan(a.indexOf('--allowedTools'));
+  });
+
+  it('con --mcp-config, el aislamiento mínimo deja ToolSearch para las herramientas MCP diferidas', () => {
+    const a = buildClaudeArgs({ sessionId: 's', resume: false, level: 1, profile: { ...profile, mcpConfig: '/x/mcp.json' }, systemPrompt: 'S' });
+    expect(valueOf(a, '--tools').split(',')).toContain('ToolSearch');
+    expect(a).toContain('--strict-mcp-config');
+  });
+
+  it("isolation 'user' carga la configuración, skills y herramientas del usuario, pero solo los MCP del perfil", () => {
+    const a = buildClaudeArgs({ sessionId: 's', resume: false, level: 1, profile: { ...profile, isolation: 'user' }, systemPrompt: 'S' });
+    expect(valueOf(a, '--setting-sources')).toBe('user,project,local');
+    expect(a).toContain('--strict-mcp-config');
+    for (const flag of ['--disable-slash-commands', '--settings', '--tools']) expect(a).not.toContain(flag);
   });
 
   it('añade --mcp-config si el perfil lo define', () => {
