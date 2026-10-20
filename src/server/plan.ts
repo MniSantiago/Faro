@@ -49,7 +49,18 @@ export class Plan {
   private refreshing = new Map<string, Promise<CachedBuild>>();
   private githubCache = new Map<string, { at: number; value: GitHubState }>();
 
-  private async githubState(p: ProjectConfig): Promise<GitHubState | null> {
+  private githubRefreshing = new Map<string, Promise<GitHubState | null>>();
+
+  /** Estado de GitHub con caché; una sola consulta a la vez por proyecto. */
+  private githubState(p: ProjectConfig): Promise<GitHubState | null> {
+    const running = this.githubRefreshing.get(p.id);
+    if (running) return running;
+    const job = this.loadGithubState(p).finally(() => this.githubRefreshing.delete(p.id));
+    this.githubRefreshing.set(p.id, job);
+    return job;
+  }
+
+  private async loadGithubState(p: ProjectConfig): Promise<GitHubState | null> {
     const gh = this.d.github;
     if (!gh || !p.github) return null;
     const hit = this.githubCache.get(p.id);

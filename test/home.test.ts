@@ -361,6 +361,27 @@ describe('homeView con un plan lento', () => {
     expect(unhandled).toEqual([]);
   });
 
+  it('dos peticiones solapadas comparten una sola consulta a plan.state (también la que quedó atrás tras el límite)', async () => {
+    const { config, store } = setup({ github: { ci: true } });
+    let calls = 0;
+    const plan = { state: async (): Promise<PlanState> => { calls++; await new Promise((r) => setTimeout(r, 80)); return state(); } };
+    const [a, b] = await Promise.all([
+      homeView({ store, config, plan, planTimeoutMs: 20 }, 'demo', NOW),
+      homeView({ store, config, plan, planTimeoutMs: 20 }, 'demo', NOW),
+    ]);
+    expect([a.pending, b.pending]).toEqual([true, true]);
+    const c = await homeView({ store, config, plan, planTimeoutMs: 500 }, 'demo', NOW); // aún en vuelo: la reutiliza
+    expect(c.pending).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('un throw síncrono de plan.state también se captura', async () => {
+    const { config, store } = setup();
+    const v = await homeView({ store, config, plan: { state: () => { throw new Error('boom'); } } }, 'demo', NOW);
+    expect(v.pending).toBe(false);
+    expect(v.tiles).toHaveLength(4);
+  });
+
   it('un plan rápido no marca pending', async () => {
     const { config, store } = setup({ github: { ci: true } });
     const v = await homeView({ store, config, plan: { state: async () => state() } }, 'demo', NOW);

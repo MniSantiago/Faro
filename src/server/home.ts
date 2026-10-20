@@ -239,8 +239,9 @@ function healthLines(d: HomeDeps, p: ProjectConfig, st: PlanState | null, now: D
     const failed = [...last].filter(([, r]) => r.outcome !== 'done').sort(([, a], [, b]) => (a.endedAt < b.endedAt ? 1 : -1));
     if (!failed.length) lines.push({ id: 'routines', label: 'Rutinas', detail: 'Ninguna falló en 7 días', tone: 'ok' });
     else {
-      const [recent] = failed.map(([id, r]) => describe(id, r));
-      const all = failed.map(([id, r]) => describe(id, r).full);
+      const described = failed.map(([id, r]) => describe(id, r));
+      const [recent] = described;
+      const all = described.map((x) => x.full);
       lines.push(failed.length === 1
         ? { id: 'routines', label: 'Rutinas', detail: recent.short, title: recent.full, tone: 'bad' }
         : { id: 'routines', label: 'Rutinas', detail: `${failed.length} rutinas fallaron · la más reciente, ${recent.short}`, title: all.join('\n'), tone: 'bad' });
@@ -267,6 +268,20 @@ function weekLines(d: HomeDeps, p: ProjectConfig, now: Date, from7: string): Hom
   return week;
 }
 
+const inFlight = new WeakMap<object, Map<string, Promise<PlanState | null>>>();
+
+/** `plan.state` de un proyecto, una sola consulta a la vez: las peticiones que se solapan (o la que quedó atrás tras el límite) la comparten. Nunca rechaza. */
+function planState(plan: Pick<Plan, 'state'>, projectId: string): Promise<PlanState | null> {
+  let byProject = inFlight.get(plan);
+  if (!byProject) inFlight.set(plan, byProject = new Map());
+  const running = byProject.get(projectId);
+  if (running) return running;
+  const job: Promise<PlanState | null> = Promise.resolve().then(() => plan.state(projectId)).catch(() => null)
+    .finally(() => { byProject!.delete(projectId); });
+  byProject.set(projectId, job);
+  return job;
+}
+
 /** Todo lo que pinta la home de un proyecto. Sin `plan` (o si falla), la salud omite el CI, el build y los PR. */
 export async function homeView(d: HomeDeps, projectId: string, now: Date): Promise<HomeView> {
   const p = getProject(d.config, projectId);
@@ -275,7 +290,7 @@ export async function homeView(d: HomeDeps, projectId: string, now: Date): Promi
   if (d.plan) {
     // EAS y GitHub pueden tardar segundos: pasado el límite se devuelve la home sin el plan. La promesa sigue y deja el plan
     // en la caché de `Plan`, así que la siguiente llamada ya lo encuentra.
-    const slow = d.plan.state(projectId).catch(() => null);
+    const slow = planState(d.plan, projectId);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<'late'>((resolve) => { timer = setTimeout(() => resolve('late'), d.planTimeoutMs ?? PLAN_TIMEOUT_MS); });
     const got = await Promise.race([slow, late]);
