@@ -152,14 +152,12 @@ export function Nav({ route }: { route: string }) {
         {spend && <p className="side-spend">Hoy {formatUsd(spend.today)}<span className="note">equivalente API; tu plan no lo cobra</span></p>}
       </nav>
       <nav className="tabbar" aria-label="Navegación">
-        <a href="#/" aria-current={cur('inicio')}><span className="ico-wrap"><Icon name="inicio" />{badge}</span>Inicio</a>
+        <a href="#/" aria-current={cur('inicio')}><span className="ico-wrap"><Icon name="inicio" /></span>Inicio</a>
+        <a href="#/bandeja" aria-current={cur('bandeja')}><span className="ico-wrap"><Icon name="bandeja" />{badge}</span>Bandeja</a>
         <a href="#/chats" aria-current={cur('chats')}><span className="ico-wrap"><Icon name="chats" />{dot}</span>Chats</a>
-        <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
         <PlusMenu route={route} />
+        <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
         <a href="#/rutinas" aria-current={cur('rutinas')}><span className="ico-wrap"><Icon name="rutinas" /></span>Rutinas</a>
-        {show.metrics
-          ? <a href="#/metricas" aria-current={cur('metricas')}><span className="ico-wrap"><Icon name="metricas" /></span>Métricas</a>
-          : <a href="#/dispositivos" aria-current={cur('dispositivos')}><span className="ico-wrap"><Icon name="dispositivos" /></span>Dispositivos</a>}
       </nav>
     </>
   );

@@ -72,8 +72,7 @@ function Shell() {
             : route === '/historial' ? <History />
             : route === '/bandeja' ? <Inbox />
             : route === '/config' || route.startsWith('/config/') ? <Config />
-            : route === '/' || route === '/inicio' || route.startsWith('/inicio/') ? <Home />
-            : <Inbox />}
+            : <Home />}
         </main>
       </div>
     </div>

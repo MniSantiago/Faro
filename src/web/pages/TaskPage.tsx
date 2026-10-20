@@ -115,7 +115,7 @@ export function TaskPage({ id }: { id: string }) {
 
   return (
     <div className="task">
-      <a href={isChat ? '#/chats' : '#/'} className="back">{isChat ? '← Chats' : '← Bandeja'}</a>
+      <a href={isChat ? '#/chats' : '#/bandeja'} className="back">{isChat ? '← Chats' : '← Bandeja'}</a>
       <header className="task-head">
         <h1><span className="id">{task.id}</span> {task.title}</h1>
         <p className="meta">
