@@ -72,7 +72,7 @@ function Icon({ name }: { name: NavSection | 'mas' }) {
   );
 }
 
-function PlusMenu({ route }: { route: string }) {
+function PlusMenu({ route, metrics, aso }: { route: string; metrics: boolean; aso: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -95,6 +95,11 @@ function PlusMenu({ route }: { route: string }) {
         <div className="plus-menu" role="menu">
           <a role="menuitem" href="#/nueva" onClick={() => setOpen(false)}>Nueva tarea</a>
           <a role="menuitem" href="#/chat/nuevo" onClick={() => setOpen(false)}>Nuevo chat</a>
+          <hr className="plus-sep" />
+          {metrics && <a role="menuitem" href="#/metricas" onClick={() => setOpen(false)}>Métricas</a>}
+          {aso && <a role="menuitem" href="#/aso" onClick={() => setOpen(false)}>ASO</a>}
+          <a role="menuitem" href="#/dispositivos" onClick={() => setOpen(false)}>Dispositivos</a>
+          <a role="menuitem" href="#/config" onClick={() => setOpen(false)}>Configuración</a>
         </div>
       )}
     </div>
@@ -155,7 +160,7 @@ export function Nav({ route }: { route: string }) {
         <a href="#/" aria-current={cur('inicio')}><span className="ico-wrap"><Icon name="inicio" /></span>Inicio</a>
         <a href="#/bandeja" aria-current={cur('bandeja')}><span className="ico-wrap"><Icon name="bandeja" />{badge}</span>Bandeja</a>
         <a href="#/chats" aria-current={cur('chats')}><span className="ico-wrap"><Icon name="chats" />{dot}</span>Chats</a>
-        <PlusMenu route={route} />
+        <PlusMenu route={route} metrics={show.metrics} aso={show.aso} />
         <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
         <a href="#/rutinas" aria-current={cur('rutinas')}><span className="ico-wrap"><Icon name="rutinas" /></span>Rutinas</a>
       </nav>

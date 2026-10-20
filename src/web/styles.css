@@ -287,6 +287,7 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .plus-menu { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 170px; display: grid; padding: 6px; border-radius: 12px;
     border: 1px solid var(--line); background: var(--card); box-shadow: 0 8px 24px rgb(0 0 0 / .18); }
   .plus-menu a { padding: 10px 12px; border-radius: 8px; text-decoration: none; font-size: 15px; }
+  .plus-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   .plus-menu a:hover, .plus-menu a:focus-visible { background: var(--bg); }
   /* El compositor de la tarea queda encima de la barra inferior. */
   .composer { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
