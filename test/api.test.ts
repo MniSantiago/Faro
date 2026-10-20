@@ -675,7 +675,8 @@ describe('API de la home', () => {
     expect((await get('project=nope&metric=gasto&days=7')).statusCode).toBe(404);
     const r = await get('project=demo&metric=gasto&days=30');
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toMatchObject({ metric: 'gasto', days: 30, current: 0, breakdown: [] });
+    expect(r.json()).toMatchObject({ metric: 'gasto', days: 30, current: 0, note: 'Equivalente API' });
+    expect(r.json().breakdowns.map((b: { title: string }) => b.title)).toEqual(['Por rutina', 'Por perfil', 'Resumen']);
     expect(r.json().points).toHaveLength(30);
   });
 });

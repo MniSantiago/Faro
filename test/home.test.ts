@@ -128,6 +128,20 @@ describe('homeView', () => {
     expect(by.build.detail).toContain('1.2.0 (34)');
   });
 
+  it('CI en verde, cambios sin build y el último build en la tienda: «Hay cambios esperando el próximo build»', async () => {
+    const { config, store } = setup({ github: { ci: true }, release: { cwd: '.', build: 'b', submit: 's' }, metrics: { ascAppId: '123' } });
+    store.addSnapshot('demo', 'appstore', true, { version: '1.2.0', review_state: 'READY_FOR_SALE', review_version: '1.2.0' }, null, daysAgo(0, -1));
+    const plan = { state: async (): Promise<PlanState> => ({
+      backlog: null, backlogError: null, buildFetchedAt: null, buildError: null, unshippedError: null,
+      build: { version: '1.2.0', buildNumber: '34', commit: 'abc', createdAt: daysAgo(5).toISOString() },
+      unshipped: [{ taskId: null, title: 'x', commits: 1, lastAt: '', touchesApp: true, state: null, tested: false }],
+      github: { ci: { sha: 'abc', state: 'success', url: 'u', workflows: ['ci'], at: daysAgo(0, -2).toISOString() }, prs: [], error: null },
+    }) };
+    const v = await homeView({ store, config, plan }, 'demo', NOW);
+    expect(v.headline).toEqual({ text: 'Hay cambios esperando el próximo build', detail: 'CI en verde', needCount: 0 });
+    expect(v.health.find((h) => h.id === 'build')?.detail).toContain('En la tienda');
+  });
+
   it('si plan.state falla, la salud omite sus líneas y la home carga', async () => {
     const { config, store } = setup({ github: { ci: true }, release: { cwd: '.', build: 'b', submit: 's' } });
     const v = await homeView({ store, config, plan: { state: async () => { throw new Error('EAS caído'); } } }, 'demo', NOW);
@@ -172,9 +186,10 @@ describe('homeView', () => {
 });
 
 describe('homeSeries', () => {
-  it('una muestra por día (la última foto del día)', () => {
+  it('una muestra por día (la última foto del día con dato)', () => {
     const { config, store } = setup({ metrics: METRICS });
     store.addSnapshot('demo', 'revenuecat', true, { mrr: 90, active_trials: 3, active_subscriptions: 9 }, null, daysAgo(2, -3));
+    store.addSnapshot('demo', 'revenuecat', true, { active_trials: 3 }, null, daysAgo(2, -1)); // sin MRR: no borra el 90
     store.addSnapshot('demo', 'revenuecat', true, { mrr: 100 }, null, daysAgo(1, -3));
     store.addSnapshot('demo', 'revenuecat', true, { mrr: 110, active_trials: 4, active_subscriptions: 11 }, null, daysAgo(1, -1));
     store.addSnapshot('demo', 'revenuecat', false, { mrr: 999 }, 'falló', daysAgo(0, -1));
@@ -185,7 +200,7 @@ describe('homeSeries', () => {
     expect(s.points.at(-3)?.value).toBe(90);
     expect(s.points[0].value).toBeNull();
     expect(s.current).toBe(110);
-    expect(s.breakdown).toEqual([{ label: 'MRR', value: 110 }, { label: 'Pruebas activas', value: 4 }, { label: 'Suscripciones activas', value: 11 }]);
+    expect(s.breakdowns).toEqual([{ title: 'Ahora', rows: [{ label: 'MRR', value: 110 }, { label: 'Pruebas activas', value: 4 }, { label: 'Suscripciones activas', value: 11 }] }]);
   });
 
   it('descargas por día y desglose por país sin la fila centinela', () => {
@@ -194,23 +209,40 @@ describe('homeSeries', () => {
     store.upsertDailyDownloads('demo', localDay(daysAgo(2)), []);
     const s = homeSeries({ store, config }, 'demo', 'descargas', 7, NOW);
     expect(s.points.map((p) => p.value)).toEqual([null, null, null, 7, 0, null, null]);
-    expect(s.breakdown).toEqual([{ label: 'ES', value: 5 }, { label: 'US', value: 2 }]);
+    expect(s.breakdowns).toEqual([{ title: 'Por país', rows: [{ label: 'ES', value: 5 }, { label: 'US', value: 2 }] }]);
   });
 
-  it('gasto: por día y desglose por rutina (las 10 más caras)', () => {
+  it('gasto: por día, total del periodo y desgloses por rutina (las 10 más caras), por perfil y coste medio', () => {
     const routines = Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, name: `Rutina ${i}`, profileId: 'dev', level: 1 as const, title: 't', prompt: 'p' }));
     const { config, store, project } = setup({ routines });
     routines.forEach((r, i) => addRun(store, project, { at: daysAgo(1), cost: i + 1, routineId: r.id }));
-    addRun(store, project, { at: daysAgo(2), cost: 0.5 }); // sin rutina
+    addRun(store, project, { at: daysAgo(2), cost: 0.5, profileId: 'otro' }); // sin rutina
+    addRun(store, project, { at: daysAgo(20), cost: 10 }); // dentro de 30 días, fuera de 7
     const s = homeSeries({ store, config }, 'demo', 'gasto', 30, NOW);
+    expect(s.current).toBe(88.5);
+    expect(homeSeries({ store, config }, 'demo', 'gasto', 7, NOW).current).toBe(78.5);
     expect(s.points).toHaveLength(30);
     expect(s.points.at(-2)?.value).toBe(78);
     expect(s.points.at(-3)?.value).toBe(0.5);
     expect(s.points[0].value).toBe(0);
-    expect(s.breakdown).toHaveLength(10);
-    expect(s.breakdown[0]).toEqual({ label: 'Rutina 11', value: 12 });
-    expect(s.breakdown.at(-1)).toEqual({ label: 'Rutina 2', value: 3 });
-    expect(s.note).toMatch(/^Equivalente API · coste medio por ejecución /);
+    expect(s.breakdowns.map((b) => b.title)).toEqual(['Por rutina', 'Por perfil', 'Resumen']);
+    const [byRoutine, byProfile, summary] = s.breakdowns;
+    expect(byRoutine.rows).toHaveLength(10);
+    expect(byRoutine.rows[0]).toEqual({ label: 'Rutina 11', value: 12 });
+    expect(byRoutine.rows.at(-1)).toEqual({ label: 'Rutina 2', value: 3 });
+    expect(byProfile.rows).toEqual([{ label: 'Dev', value: 88 }, { label: 'otro', value: 0.5 }]);
+    expect(summary.rows).toHaveLength(1);
+    expect(summary.rows[0].label).toBe('Coste medio por ejecución');
+    expect(summary.rows[0].value).toBeCloseTo(88.5 / 14);
+    expect(s.note).toBe('Equivalente API');
+  });
+
+  it('conversión: sin desgloses (el embudo se pinta aparte)', () => {
+    const { config, store } = setup({ metrics: METRICS });
+    store.addSnapshot('demo', 'posthog', true, { trial: 10, paid: 2, conversion: 0.2 }, null, daysAgo(0, -1));
+    const s = homeSeries({ store, config }, 'demo', 'conversion', 7, NOW);
+    expect(s.current).toBe(0.2);
+    expect(s.breakdowns).toEqual([]);
   });
 
   it('métrica sin configurar: puntos vacíos y nota', () => {

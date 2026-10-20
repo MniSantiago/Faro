@@ -33,8 +33,15 @@ export interface HomeView {
 export interface SeriesView {
   metric: HomeMetric; days: number;
   points: { day: string; value: number | null }[];
-  current: number | null; deltaPct: number | null;
-  breakdown: { label: string; value: number }[];
+  /**
+   * Valor de la cifra para el detalle. Gasto: total del periodo elegido (7/30/90 días). Descargas: suma de los 7 últimos días
+   * con informe (la de la home). Conversión y MRR: la foto más reciente (la conversión ya es una ventana móvil de 7 días).
+   */
+  current: number | null;
+  /** Variación frente a la semana anterior, como en la home (no depende del periodo). */
+  deltaPct: number | null;
+  /** Desgloses con título (gasto: por rutina, por perfil y resumen; descargas: por país; MRR: ahora). La conversión no lleva: su embudo se pinta aparte. */
+  breakdowns: { title: string; rows: { label: string; value: number }[] }[];
   note: string | null;
 }
 
@@ -100,8 +107,11 @@ function dailyValues(store: Store, p: ProjectConfig, metric: HomeMetric, days: s
     for (const r of store.dailyDownloads(p.id, days[0], days.at(-1)!)) byDay.set(r.day, (byDay.get(r.day) ?? 0) + r.units);
   } else {
     const { source, key } = SNAPSHOT[metric]!;
-    // En orden: la última foto de cada día pisa a las anteriores.
-    for (const s of store.snapshotsSince(p.id, source, from)) byDay.set(localDay(new Date(s.takenAt)), num(s.data[key]));
+    // En orden: la última foto de cada día con dato pisa a las anteriores (una foto sin la clave no borra el valor del día).
+    for (const s of store.snapshotsSince(p.id, source, from)) {
+      const v = num(s.data[key]);
+      if (v !== null) byDay.set(localDay(new Date(s.takenAt)), v);
+    }
   }
   return days.map((d) => byDay.get(d) ?? null);
 }
@@ -257,46 +267,48 @@ export function homeSeries(d: HomeDeps, projectId: string, metric: HomeMetric, d
   const p = getProject(d.config, projectId);
   const dayList = lastDays(now, days);
   if (!configured(p, metric)) {
-    return { metric, days, points: dayList.map((day) => ({ day, value: null })), current: null, deltaPct: null, breakdown: [], note: 'Sin configurar' };
+    return { metric, days, points: dayList.map((day) => ({ day, value: null })), current: null, deltaPct: null, breakdowns: [], note: 'Sin configurar' };
   }
   const values = dailyValues(d.store, p, metric, dayList, now);
   const points = dayList.map((day, i) => ({ day, value: values[i] }));
   const f = figure(d.store, p, metric, now);
   const from = dayStart(now, days - 1).toISOString();
-  let breakdown: SeriesView['breakdown'] = [];
+  let current = f.value;
+  let breakdowns: SeriesView['breakdowns'] = [];
   let note: string | null = null;
 
   if (metric === 'gasto') {
-    breakdown = d.store.spendBy('routine', from).slice(0, TOP).map((r) => ({ label: routineName(d.config, r.key), value: r.usd }));
+    const byProfile = d.store.spendBy('profile', from);
     // Todas las ejecuciones con coste tienen perfil: sumar por perfil da el total de ejecuciones.
-    const runs = sum(d.store.spendBy('profile', from).map((r) => r.runs));
-    const total = sum(values as number[]);
-    note = runs > 0 ? `Equivalente API · coste medio por ejecución ${money(total / runs)}` : 'Equivalente API';
+    const runs = sum(byProfile.map((r) => r.runs));
+    current = sum(values as number[]);
+    const profileName = (id: string) => d.config.profiles.find((x) => x.id === id)?.name ?? id;
+    breakdowns = [
+      { title: 'Por rutina', rows: d.store.spendBy('routine', from).slice(0, TOP).map((r) => ({ label: routineName(d.config, r.key), value: r.usd })) },
+      { title: 'Por perfil', rows: byProfile.map((r) => ({ label: profileName(r.key), value: r.usd })) },
+      { title: 'Resumen', rows: runs > 0 ? [{ label: 'Coste medio por ejecución', value: current / runs }] : [] },
+    ];
+    note = 'Equivalente API';
   } else {
     if (metric === 'descargas') {
       const byCountry = new Map<string, number>();
       for (const r of d.store.dailyDownloads(p.id, dayList[0], dayList.at(-1)!)) {
         if (r.country) byCountry.set(r.country, (byCountry.get(r.country) ?? 0) + r.units);
       }
-      breakdown = [...byCountry].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, TOP).map(([label, value]) => ({ label, value }));
-    } else if (metric === 'conversion') {
-      // El embudo de los últimos 7 días, como en Métricas.
-      const snap = d.store.latestSnapshot(p.id, 'posthog', true);
-      breakdown = (p.metrics?.posthogFunnel?.steps ?? []).flatMap((s) => {
-        const v = num(snap?.data[s.event]);
-        return v === null ? [] : [{ label: s.label, value: v }];
-      });
-    } else {
+      const rows = [...byCountry].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, TOP).map(([label, value]) => ({ label, value }));
+      breakdowns = [{ title: 'Por país', rows }];
+    } else if (metric === 'mrr') {
       const snap = d.store.latestSnapshot(p.id, 'revenuecat', true);
-      breakdown = ([['mrr', 'MRR'], ['active_trials', 'Pruebas activas'], ['active_subscriptions', 'Suscripciones activas']] as const).flatMap(([k, label]) => {
+      const rows = ([['mrr', 'MRR'], ['active_trials', 'Pruebas activas'], ['active_subscriptions', 'Suscripciones activas']] as const).flatMap(([k, label]) => {
         const v = num(snap?.data[k]);
         return v === null ? [] : [{ label, value: v }];
       });
+      breakdowns = [{ title: 'Ahora', rows }];
     }
     const known = values.filter((v) => v !== null).length;
     if (known === 0) note = 'Todavía no hay datos';
     // Historial más corto que el periodo (el primer día no tiene dato): se dice cuántos días hay.
     else if (values[0] === null) note = `Hay datos de ${plural(known, 'día', 'días')}`;
   }
-  return { metric, days, points, current: f.value, deltaPct: f.deltaPct, breakdown, note };
+  return { metric, days, points, current, deltaPct: f.deltaPct, breakdowns, note };
 }
