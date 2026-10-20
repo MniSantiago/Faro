@@ -87,9 +87,13 @@ describe('volver a la config (restored)', () => {
     no(canChange(remote, ch({ before: routine({ level: 2 }), restored: routine({ release: 'build' }) }), config));
     no(canChange(remote, ch({ kind: 'profile', id: 'dev', before: { defaultLevel: 2 }, restored: { defaultLevel: 3 } }), config));
   });
-  it('mcpConfig distinto al restaurar se edita en faro.config.ts, también en el Mac', () => {
-    expect(canChange(mac, ch({ kind: 'profile', id: 'dev', before: { defaultLevel: 1, mcpConfig: 'a' }, restored: { defaultLevel: 1 } }), config))
-      .toEqual({ ok: false, reason: 'Se edita en faro.config.ts' });
+  it('mcpConfig distinto al restaurar: el Mac puede, el vinculado no', () => {
+    const c = ch({ kind: 'profile', id: 'dev', before: { defaultLevel: 1, mcpConfig: 'a' }, restored: { defaultLevel: 1 } });
+    expect(canChange(mac, c, config)).toEqual({ ok: true });
+    expect(canChange(remote, c, config)).toEqual({ ok: false, reason: 'Se edita en faro.config.ts' });
+  });
+  it('el Mac puede restaurar una versión con release', () => {
+    expect(canChange(mac, ch({ before: routine(), restored: routine({ release: 'build' }) }), config)).toEqual({ ok: true });
   });
   it('versión inofensiva: ok; sin restored es un borrado puro', () => {
     expect(canChange(remote, ch({ before: routine({ level: 2 }), restored: routine({ level: 1 }) }), config)).toEqual({ ok: true });

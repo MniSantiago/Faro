@@ -33,8 +33,9 @@ export function canChange(actor: Actor, change: Change, config: FaroConfig): Acc
   const { kind, id, before } = change;
   // Lo que quedaría tras el cambio: el elemento nuevo o, al volver a la config, el del archivo.
   const after = change.after ?? change.restored ?? null;
-  if (kind === 'routine' && after && publishes(after)) return no('Se edita en faro.config.ts');
-  if (kind === 'profile' && after && after.mcpConfig !== before?.mcpConfig) return no('Se edita en faro.config.ts');
+  const set = change.after; // las reglas universales miran solo lo que el panel pone, no lo que restaura el archivo
+  if (kind === 'routine' && set && publishes(set)) return no('Se edita en faro.config.ts');
+  if (kind === 'profile' && set && set.mcpConfig !== before?.mcpConfig) return no('Se edita en faro.config.ts');
   if (actor.local) return OK;
 
   if (kind === 'project' || kind === 'general') return no('Solo desde el Mac');
@@ -49,6 +50,7 @@ export function canChange(actor: Actor, change: Change, config: FaroConfig): Acc
   }
 
   // profile
+  if (!change.after && after && after.mcpConfig !== before?.mcpConfig) return no('Se edita en faro.config.ts');
   if (highLevel(after?.defaultLevel)) return no('Desde un dispositivo vinculado solo se pueden usar los niveles 1 y 2');
   if (highLevel(before?.defaultLevel)) return no('Desde un dispositivo vinculado no se puede editar un perfil de nivel 3 o 4');
   if (id === (config.coordinatorProfile ?? 'coordinador')) {
