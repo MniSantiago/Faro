@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConfigFull, ConfigRoutineView } from '../../server/api-config';
+import type { ConfigFull, ConfigProfileView, ConfigProjectView, ConfigRoutineView } from '../../server/api-config';
 import { api, authState, subscribe, type RoutineView } from '../api';
+import { GeneralForm } from '../components/config/GeneralForm';
+import { ProfileForm } from '../components/config/ProfileForm';
+import { ProjectForm } from '../components/config/ProjectForm';
 import { RoutineForm, type SavedNotice } from '../components/config/RoutineForm';
 import { describeCron } from '../cron';
 
@@ -8,6 +11,8 @@ const TABS = [['rutinas', 'Rutinas'], ['perfiles', 'Perfiles'], ['proyecto', 'Pr
 type Tab = typeof TABS[number][0];
 /** Elemento de la ruta para una rutina nueva (los ids son slugs: nunca llevan «+»). */
 const NEW_ID = '+nueva';
+/** Igual, para un perfil nuevo. */
+const NEW_PROFILE = '+nuevo';
 const CHANGES_LOST = 'Hay cambios sin guardar. ¿Descartarlos?';
 
 /** `#/config/<pestaña>/<id>` → pestaña (por defecto Rutinas) e id del elemento. */
@@ -69,7 +74,9 @@ export function Config({ route }: { route: string }) {
       {error && <p className="error" role="alert">{error}</p>}
       {!full ? (!error && <p className="muted">Cargando…</p>)
         : tab === 'rutinas' ? <RoutinesTab full={full} rows={rows} id={id} local={local} go={go} onDirty={onDirty} reload={load} />
-        : <p className="muted">Próximamente.</p>}
+        : tab === 'perfiles' ? <ProfilesTab full={full} id={id} local={local} go={go} onDirty={onDirty} reload={load} />
+        : tab === 'proyecto' ? <ProjectTab full={full} id={id} go={go} onDirty={onDirty} reload={load} />
+        : <GeneralTab full={full} onDirty={onDirty} reload={load} />}
     </div>
   );
 }
@@ -78,6 +85,7 @@ interface TabProps {
   full: ConfigFull; rows: RoutineView[]; id: string | null; local: boolean;
   go: (hash: string) => void; onDirty: (d: boolean) => void; reload: () => Promise<void>;
 }
+type SimpleTabProps = Omit<TabProps, 'rows' | 'local'>;
 
 function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
   // Se incrementa tras cada guardado: el formulario se monta de nuevo desde la rutina guardada.
@@ -146,4 +154,87 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
       </div>
     </>
   );
+}
+
+function ProfilesTab({ full, id, local, go, onDirty, reload }: Omit<TabProps, 'rows'>) {
+  const [version, setVersion] = useState(0);
+  const creating = id === NEW_PROFILE;
+  const selected: ConfigProfileView | null = creating ? null : full.profiles.find((p) => p.id === id) ?? (id ? null : full.profiles[0] ?? null);
+  const ignored = full.ignored.filter((i) => i.kind === 'profile');
+
+  // Como en Rutinas: se espera a tener la config nueva antes de cambiar de formulario.
+  const onSaved = async (goTo: string | null) => {
+    await reload();
+    setVersion((v) => v + 1);
+    const hash = goTo ? `#/config/perfiles/${encodeURIComponent(goTo)}` : '#/config/perfiles';
+    if (location.hash !== hash) location.hash = hash;
+  };
+
+  return (
+    <>
+      {ignored.length > 0 && (
+        <div className="notice config-ignored" role="note">
+          {ignored.map((i) => <p key={i.id}>No se aplica el cambio del panel en el perfil <code>{i.id}</code>: {i.reason}</p>)}
+        </div>
+      )}
+      <div className="config-grid">
+        <div className="clist">
+          {full.profiles.map((p) => {
+            const current = selected?.id === p.id;
+            return (
+              <button key={p.id} type="button" className={`cli${current ? ' on' : ''}`} aria-current={current || undefined}
+                onClick={() => go(`#/config/perfiles/${encodeURIComponent(p.id)}`)}>
+                <span className="cli-main">
+                  {p.name}
+                  <small>N{p.defaultLevel}{p.model ? ` · ${p.model}` : ''}{p.usedBy.length ? ` · ${p.usedBy.length} ${p.usedBy.length > 1 ? 'rutinas' : 'rutina'}` : ''}</small>
+                </span>
+                <span className={`tag${p.origin === 'config' ? '' : ' p'}`}>{p.origin}</span>
+              </button>
+            );
+          })}
+          <button type="button" className={`cli new${creating ? ' on' : ''}`} onClick={() => go(`#/config/perfiles/${NEW_PROFILE}`)}>+ Nuevo perfil</button>
+        </div>
+        <div className="cdetail">
+          {creating || selected ? (
+            <ProfileForm key={`${selected?.id ?? NEW_PROFILE}:${version}`} profile={selected} local={local} onDirty={onDirty} onSaved={onSaved} />
+          ) : id ? (
+            <p className="muted">El perfil <code>{id}</code> no existe.</p>
+          ) : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProjectTab({ full, id, go, onDirty, reload }: SimpleTabProps) {
+  const [version, setVersion] = useState(0);
+  const selected: ConfigProjectView | null = full.projects.find((p) => p.id === id) ?? (id ? null : full.projects[0] ?? null);
+  const onSaved = async () => { await reload(); setVersion((v) => v + 1); };
+  const form = selected
+    ? <ProjectForm key={`${selected.id}:${version}`} full={full} project={selected} onDirty={onDirty} onSaved={onSaved} />
+    : id ? <p className="muted">El proyecto <code>{id}</code> no existe.</p> : <p className="muted">No hay proyectos en la config.</p>;
+  if (full.projects.length < 2) return form;
+  return (
+    <div className="config-grid">
+      <div className="clist">
+        {full.projects.map((p) => {
+          const current = selected?.id === p.id;
+          return (
+            <button key={p.id} type="button" className={`cli${current ? ' on' : ''}`} aria-current={current || undefined}
+              onClick={() => go(`#/config/proyecto/${encodeURIComponent(p.id)}`)}>
+              <span className="cli-main">{p.name}<small>{p.baseBranch}</small></span>
+              <span className={`tag${p.origin === 'config' ? '' : ' p'}`}>{p.origin}</span>
+            </button>
+          );
+        })}
+      </div>
+      {form}
+    </div>
+  );
+}
+
+function GeneralTab({ full, onDirty, reload }: Pick<SimpleTabProps, 'full' | 'onDirty' | 'reload'>) {
+  const [version, setVersion] = useState(0);
+  const onSaved = async () => { await reload(); setVersion((v) => v + 1); };
+  return <GeneralForm key={version} full={full} onDirty={onDirty} onSaved={onSaved} />;
 }

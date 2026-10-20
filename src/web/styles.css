@@ -433,7 +433,20 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 .rform > .error { margin: 0; }
 .rform-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
 .rform-bar .origin { font-size: 13px; color: var(--muted); margin-right: auto; }
+.rform .fgroup { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.rform .funnel { font-size: 13px; line-height: 1.5; resize: vertical; }
+.rform .used { display: flex; flex-wrap: wrap; gap: 6px; }
+.rform .muted { color: var(--muted); }
+.secrets { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.secrets li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.secrets .cmd { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.secrets .btn.small { margin-left: 0; }
+.rform.ro dl { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: 14px; }
+.rform.ro dt { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.rform.ro dd { margin: 0; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 4px; }
 @media (max-width: 767.98px) {
+  .rform.ro dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rform.ro dd { margin-bottom: 8px; }
   .config-grid { grid-template-columns: minmax(0, 1fr); }
   .rform { padding: 14px; }
   .rform .r2 { grid-template-columns: minmax(0, 1fr); }
