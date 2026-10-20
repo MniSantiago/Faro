@@ -46,6 +46,15 @@ process.stdin.on('end', async () => {
     if (env.FAKE_ORPHAN_PID_OUT) fs.appendFileSync(env.FAKE_ORPHAN_PID_OUT, gc.pid + '\n');
     gc.unref();
   }
+  if (env.FAKE_JSON_RESULT) {
+    // Como `claude -p --output-format json`: un solo objeto con `structured_output` y `total_cost_usd`.
+    const structured = JSON.parse(fs.readFileSync(env.FAKE_JSON_RESULT, 'utf8'));
+    process.stdout.write(JSON.stringify({
+      type: 'result', subtype: env.FAKE_JSON_SUBTYPE ?? 'success', is_error: !!env.FAKE_JSON_SUBTYPE,
+      result: '', structured_output: structured, total_cost_usd: Number(env.FAKE_JSON_COST ?? 0.002),
+    }) + '\n');
+    process.exit(0);
+  }
   const file = list[Math.min(n, list.length - 1)];
   if (file) process.stdout.write(fs.readFileSync(file, 'utf8'));
   process.exit(Number(env.FAKE_EXIT ?? 0));

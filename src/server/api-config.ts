@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ApiDeps } from './api';
 import { canChange, editableBy, type Access, type Actor, type Change } from './config-access';
+import { draftRoutine } from './assistant';
 import { BadRequestError, ForbiddenError } from './errors';
 import { addSecretCommand, secretExists, type SecretName } from './keychain';
 import type { IgnoredOverride, LiveConfig, Origin, OverrideKind } from './overrides';
@@ -273,6 +274,13 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
         'estado', ...(p.metrics ? ['metrics' as const] : []), ...(p.aso ? ['aso' as const] : []),
       ]])),
     };
+  });
+
+  // Asistente: no guarda nada (el nivel del borrador ya viene capado a 2), así que vale para cualquier dispositivo vinculado.
+  app.post('/api/config/routines/draft', async (req) => {
+    const b = z.object({ projectId: text, description: text.max(2000) }).strict().parse(req.body);
+    projectOrThrow(b.projectId);
+    return draftRoutine({ config, store: d.store, claudeBin: config.claudeBin }, b.projectId, b.description);
   });
 
   // Rutinas

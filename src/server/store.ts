@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS config_overrides (
   kind TEXT NOT NULL, id TEXT NOT NULL, origin TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL, device_id TEXT,
   PRIMARY KEY (kind, id)
 );
+CREATE TABLE IF NOT EXISTS assistant_calls (id INTEGER PRIMARY KEY, at TEXT NOT NULL, cost_usd REAL NOT NULL, ok INTEGER NOT NULL);
 `;
 
 type Row = Record<string, unknown>;
@@ -454,8 +455,9 @@ export class Store {
     const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
     const startOfWeek = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 6);
     const sum = (from: Date) => (this.db.prepare(
-      'SELECT COALESCE(SUM(cost_usd), 0) AS s FROM runs WHERE cost_usd IS NOT NULL AND started_at >= ?',
-    ).get(from.toISOString()) as { s: number }).s;
+      `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM runs WHERE cost_usd IS NOT NULL AND started_at >= @f)
+            + (SELECT COALESCE(SUM(cost_usd), 0) FROM assistant_calls WHERE at >= @f) AS s`,
+    ).get({ f: from.toISOString() }) as { s: number }).s;
     return { today: sum(startOfToday), week: sum(startOfWeek) };
   }
 
@@ -463,17 +465,30 @@ export class Store {
 
   /** Gasto equivalente por día local desde `fromIso`; solo los días con gasto, en orden. */
   spendByDay(fromIso: string): { day: string; usd: number }[] {
-    return (this.db.prepare(`SELECT date(started_at, 'localtime') AS day, SUM(cost_usd) AS usd FROM runs
-      WHERE cost_usd IS NOT NULL AND started_at >= ? GROUP BY day ORDER BY day`).all(fromIso) as Row[])
+    return (this.db.prepare(`SELECT day, SUM(usd) AS usd FROM (
+        SELECT date(started_at, 'localtime') AS day, cost_usd AS usd FROM runs WHERE cost_usd IS NOT NULL AND started_at >= @f
+        UNION ALL
+        SELECT date(at, 'localtime') AS day, cost_usd AS usd FROM assistant_calls WHERE at >= @f
+      ) GROUP BY day ORDER BY day`).all({ f: fromIso }) as Row[])
       .map((r) => ({ day: r.day as string, usd: r.usd as number }));
   }
 
   /** Gasto equivalente desde `fromIso` por rutina o por perfil de la tarea, del más caro al más barato; por rutina no cuentan las tareas sin rutina. */
   spendBy(field: 'routine' | 'profile', fromIso: string): { key: string; usd: number; runs: number }[] {
     const col = field === 'routine' ? 't.routine_id' : 't.profile_id';
-    return (this.db.prepare(`SELECT ${col} AS k, SUM(r.cost_usd) AS usd, COUNT(*) AS n FROM runs r JOIN tasks t ON t.id = r.task_id
-      WHERE r.cost_usd IS NOT NULL AND r.started_at >= ? AND ${col} IS NOT NULL GROUP BY k ORDER BY usd DESC, k`).all(fromIso) as Row[])
+    // Las llamadas del asistente no tienen rutina ni perfil: salen bajo la clave «Asistente».
+    return (this.db.prepare(`SELECT k, SUM(usd) AS usd, SUM(n) AS n FROM (
+        SELECT ${col} AS k, SUM(r.cost_usd) AS usd, COUNT(*) AS n FROM runs r JOIN tasks t ON t.id = r.task_id
+          WHERE r.cost_usd IS NOT NULL AND r.started_at >= @f AND ${col} IS NOT NULL GROUP BY k
+        UNION ALL
+        SELECT 'Asistente' AS k, SUM(cost_usd) AS usd, COUNT(*) AS n FROM assistant_calls WHERE at >= @f HAVING COUNT(*) > 0
+      ) GROUP BY k ORDER BY usd DESC, k`).all({ f: fromIso }) as Row[])
       .map((r) => ({ key: r.k as string, usd: r.usd as number, runs: r.n as number }));
+  }
+
+  /** Guarda lo que costó una llamada del asistente de rutinas (cuenta en el gasto de Faro). */
+  recordAssistantCall(costUsd: number, ok: boolean): void {
+    this.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok) VALUES (?, ?, ?)').run(now(), costUsd, ok ? 1 : 0);
   }
 
   /** Ejecuciones de agentes empezadas desde `fromIso` (con o sin coste conocido). */

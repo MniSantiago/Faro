@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import { ActionError, BadRequestError, type ReviewActions } from './actions';
 import { registerConfigRoutes } from './api-config';
-import { ForbiddenError } from './errors';
+import { AssistantError, ForbiddenError } from './errors';
 import { addSecretCommand, type SecretName } from './keychain';
 import { buildCards } from './metrics/summary';
 import { homeSeries, homeView } from './home';
@@ -175,6 +175,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     if (err instanceof ForbiddenError) return reply.code(403).send({ error: message });
     if (err instanceof ZodError) return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
     if (err instanceof ConfigError) return reply.code(400).send({ error: message });
+    if (err instanceof AssistantError) return reply.code(502).send({ error: message });
     if (err instanceof BadRequestError) return reply.code(400).send({ error: message });
     if (err instanceof ActionError || err instanceof InvalidTransitionError) return reply.code(409).send({ error: message });
     const sc = (err as { statusCode?: unknown }).statusCode;

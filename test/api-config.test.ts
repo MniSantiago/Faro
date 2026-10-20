@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { InjectOptions, LightMyRequestResponse } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/server/api';
@@ -7,7 +9,7 @@ import { LiveConfig } from '../src/server/overrides';
 import { Scheduler } from '../src/server/scheduler';
 import { Store } from '../src/server/store';
 import type { BusMessage } from '../src/server/types';
-import { makeConfig, makeRepo } from './helpers';
+import { makeConfig, makeRepo, tmpDir } from './helpers';
 
 function setup(seed?: (store: Store) => void) {
   const repo = makeRepo();
@@ -273,5 +275,33 @@ describe('API de configuración', () => {
     const { app } = setup();
     const r = await app.inject({ method: 'DELETE', url: '/api/config/routines/diaria', headers: { host: '127.0.0.1:3200' } });
     expect(r.statusCode).toBe(403);
+  });
+
+  describe('asistente', () => {
+    const conAsistente = async (fn: () => Promise<void>) => {
+      const json = path.join(tmpDir(), 'draft.json');
+      writeFileSync(json, JSON.stringify({ name: 'Semanal', title: 'Semanal', cron: null, profileId: 'dev', level: 3, context: null, maxBudgetUsd: null, prompt: 'Haz algo' }));
+      process.env.FAKE_JSON_RESULT = json;
+      try { await fn(); } finally { delete process.env.FAKE_JSON_RESULT; }
+    };
+
+    it('POST /routines/draft: vale en local y desde un dispositivo vinculado, con nivel capado a 2 y sin guardar nada', async () => {
+      await conAsistente(async () => {
+        const { local, remote, live } = setup();
+        for (const inj of [local, remote]) {
+          const r = await inj({ method: 'POST', url: '/api/config/routines/draft', payload: { projectId: 'demo', description: 'algo semanal' } });
+          expect(r.statusCode).toBe(200);
+          expect(r.json()).toMatchObject({ profileId: 'dev', level: 2 });
+        }
+        expect(live.ignored()).toEqual([]);
+        expect((await full(local)).routines).toHaveLength(2);
+      });
+    });
+
+    it('proyecto desconocido: 404; sin cabecera x-faro: rechazado', async () => {
+      const { local } = setup();
+      expect((await local({ method: 'POST', url: '/api/config/routines/draft', payload: { projectId: 'nope', description: 'x' } })).statusCode).toBe(404);
+      expect((await local({ method: 'POST', url: '/api/config/routines/draft', headers: { 'x-faro': '' }, payload: { projectId: 'demo', description: 'x' } })).statusCode).toBeGreaterThanOrEqual(400);
+    });
   });
 });
