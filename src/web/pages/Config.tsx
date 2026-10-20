@@ -81,6 +81,11 @@ export function Config({ route }: { route: string }) {
   );
 }
 
+/** Solo en el móvil (< 768 px): con un elemento elegido se ve únicamente su formulario, con este enlace para volver a la lista. */
+const Back = ({ label, onClick }: { label: string; onClick: () => void }) => (
+  <button type="button" className="link cback" onClick={onClick}>← {label}</button>
+);
+
 interface TabProps {
   full: ConfigFull; rows: RoutineView[]; id: string | null; local: boolean;
   go: (hash: string) => void; onDirty: (d: boolean) => void; reload: () => Promise<void>;
@@ -118,7 +123,8 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
           {ignored.map((i) => <p key={i.id}>No se aplica el cambio del panel en la rutina <code>{i.id}</code>: {i.reason}</p>)}
         </div>
       )}
-      <div className="config-grid">
+      <div className={`config-grid${id ? ' has-sel' : ''}`}>
+        <Back label="Rutinas" onClick={() => go('#/config/rutinas')} />
         <div className="clist">
           {full.routines.map((r) => {
             const on = enabledOf(r.id);
@@ -129,7 +135,7 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
                 <span className="cli-main">
                   {r.name}
                   <small>
-                    {on ? describeCron(r.cron ?? null) : 'desactivada'} · {profileName(r.profileId)} · N{r.level}
+                    {describeCron(r.cron ?? null)}{!on && ' · desactivada'} · {profileName(r.profileId)} · N{r.level}
                     {many && ` · ${projectName(r.projectId)}`}
                   </small>
                 </span>
@@ -177,7 +183,8 @@ function ProfilesTab({ full, id, local, go, onDirty, reload }: Omit<TabProps, 'r
           {ignored.map((i) => <p key={i.id}>No se aplica el cambio del panel en el perfil <code>{i.id}</code>: {i.reason}</p>)}
         </div>
       )}
-      <div className="config-grid">
+      <div className={`config-grid${id ? ' has-sel' : ''}`}>
+        <Back label="Perfiles" onClick={() => go('#/config/perfiles')} />
         <div className="clist">
           {full.profiles.map((p) => {
             const current = selected?.id === p.id;
@@ -215,7 +222,8 @@ function ProjectTab({ full, id, go, onDirty, reload }: SimpleTabProps) {
     : id ? <p className="muted">El proyecto <code>{id}</code> no existe.</p> : <p className="muted">No hay proyectos en la config.</p>;
   if (full.projects.length < 2) return form;
   return (
-    <div className="config-grid">
+    <div className={`config-grid${id ? ' has-sel' : ''}`}>
+      <Back label="Proyectos" onClick={() => go('#/config/proyecto')} />
       <div className="clist">
         {full.projects.map((p) => {
           const current = selected?.id === p.id;

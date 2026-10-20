@@ -59,7 +59,6 @@ export function GeneralForm({ full, onDirty, onSaved }: Props) {
           <div className="r2">
             <label>Ejecuciones simultáneas
               <input inputMode="numeric" value={f.maxConcurrent} onChange={(e) => set('maxConcurrent', e.target.value)} required />
-              <span className="hint muted">Puede requerir reiniciar Faro para aplicarse.</span>
             </label>
             <label>Perfil del coordinador
               <select value={f.coordinatorProfile} onChange={(e) => set('coordinatorProfile', e.target.value)}>

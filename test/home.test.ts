@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { headline, homeSeries, homeView } from '../src/server/home';
+import { headline, homeSeries, homeView, shortReason } from '../src/server/home';
 import type { PlanState } from '../src/server/plan';
 import { Store } from '../src/server/store';
 import type { FaroConfig, ProjectConfig, RunOutcome } from '../src/server/types';
@@ -58,9 +58,11 @@ describe('headline', () => {
   });
 
   it('el detalle une CI, agentes trabajando y lo que espera, omitiendo lo que no aplica', () => {
-    expect(headline({ ...base, ci: 'success', working: 2, need: 1 }).detail).toBe('CI en verde · 2 agentes trabajando · 1 tarea te espera');
+    expect(headline({ ...base, ci: 'success', working: 2, need: 1 }).detail).toBe('CI en verde · 2 agentes trabajando');
     expect(headline({ ...base, ci: 'pending', working: 1 }).detail).toBe('CI en curso · 1 agente trabajando');
+    // Si el titular ya es «N cosas te esperan», el detalle no repite el recuento; con el CI en rojo el titular es otro y sí lo cuenta.
     expect(headline({ ...base, ci: 'failure', need: 3 }).detail).toBe('CI en rojo · 3 tareas te esperan');
+    expect(headline({ ...base, need: 4 })).toEqual({ text: '4 cosas te esperan', detail: '' });
     expect(headline(base).detail).toBe('');
   });
 });
@@ -176,12 +178,48 @@ describe('homeView', () => {
     expect(v.headline.needCount).toBe(2);
   });
 
+  it('varias rutinas fallidas: «N rutinas fallaron» y la más reciente; todas en title', async () => {
+    const routines = [
+      { id: 'informe', name: 'Informe', profileId: 'dev', level: 1 as const, title: 'I', prompt: 'x' },
+      { id: 'limpieza', name: 'Limpieza', profileId: 'dev', level: 1 as const, title: 'L', prompt: 'x' },
+    ];
+    const { config, store, project } = setup({ routines });
+    addRun(store, project, { at: daysAgo(1), routineId: 'informe', outcome: 'error', state: 'blocked', reason: 'Se rompió. Detalle' });
+    addRun(store, project, { at: daysAgo(3), routineId: 'limpieza', outcome: 'budget', state: 'blocked' });
+    const line = (await homeView({ store, config }, 'demo', NOW)).health.find((h) => h.id === 'routines');
+    expect(line?.detail).toBe('2 rutinas fallaron · la más reciente, Informe: Se rompió.');
+    expect(line?.title).toContain('Limpieza: tope de gasto alcanzado');
+    expect(line?.title).toContain('Informe: Se rompió. Detalle');
+  });
+
+  it('una sola rutina fallida: «nombre: motivo» recortado a la primera frase y 80 caracteres, con el texto entero en title', async () => {
+    const { config, store, project } = setup({ routines: [{ id: 'informe', name: 'Informe', profileId: 'dev', level: 1, title: 'I', prompt: 'x' }] });
+    const reason = 'No se pudo abrir el repositorio. Revisa la ruta configurada y vuelve a intentarlo desde el panel.';
+    addRun(store, project, { at: daysAgo(1), routineId: 'informe', outcome: 'error', state: 'blocked', reason });
+    const line = (await homeView({ store, config }, 'demo', NOW)).health.find((h) => h.id === 'routines');
+    expect(line?.detail).toBe('Informe: No se pudo abrir el repositorio.');
+    expect(line?.title).toBe(`Informe: ${reason}`);
+  });
+
   it('rutinas sin fallos: línea en verde', async () => {
     const { config, store, project } = setup({ routines: [{ id: 'informe', name: 'Informe', profileId: 'dev', level: 1, title: 'I', prompt: 'x' }] });
     addRun(store, project, { at: daysAgo(1), routineId: 'informe' });
     addRun(store, project, { at: daysAgo(9), routineId: 'informe', outcome: 'error' }); // fuera de los 7 días
     const v = await homeView({ store, config }, 'demo', NOW);
     expect(v.health.find((h) => h.id === 'routines')?.tone).toBe('ok');
+  });
+});
+
+describe('shortReason', () => {
+  it('primera frase, 80 caracteres como mucho y «…» si se corta', () => {
+    expect(shortReason('Falló el build. Más detalle')).toBe('Falló el build.');
+    expect(shortReason('Primera línea\nsegunda')).toBe('Primera línea');
+    expect(shortReason('sin punto final')).toBe('sin punto final');
+    const long = 'palabra '.repeat(20).trim();
+    const out = shortReason(long);
+    expect(out.length).toBeLessThanOrEqual(80);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out).toBe(`${long.slice(0, 79).trimEnd()}…`);
   });
 });
 
@@ -276,5 +314,67 @@ describe('Store: gasto', () => {
     expect(store.spendByDay(from)).toEqual([{ day: localDay(daysAgo(1)), usd: 3 }]);
     expect(store.spendBy('routine', from)).toEqual([{ key: 'a', usd: 3, runs: 2 }]);
     expect(store.spendBy('profile', from)).toEqual([{ key: 'otro', usd: 2, runs: 1 }, { key: 'dev', usd: 1, runs: 1 }]);
+  });
+});
+
+describe('homeView con un plan lento', () => {
+  const state = (): PlanState => ({
+    backlog: null, backlogError: null, buildFetchedAt: null, buildError: null, unshippedError: null,
+    build: { version: '1.2.0', buildNumber: '34', commit: 'abc', createdAt: daysAgo(2).toISOString() },
+    unshipped: [], github: { ci: { sha: 'abc', state: 'success', url: 'u', workflows: ['ci'], at: daysAgo(0, -2).toISOString() }, prs: [], error: null },
+  });
+
+  it('si plan.state tarda más que el límite, la home sale sin sus líneas y con pending; la promesa sigue y la siguiente llamada la usa', async () => {
+    const { config, store } = setup({ github: { ci: true }, release: { cwd: '.', build: 'b', submit: 's' } });
+    let warm: PlanState | null = null;
+    let calls = 0;
+    const plan = { state: async (): Promise<PlanState> => {
+      calls++;
+      if (warm) return warm;
+      await new Promise((r) => setTimeout(r, 120));
+      return (warm = state());
+    } };
+    const t0 = Date.now();
+    const slow = await homeView({ store, config, plan, planTimeoutMs: 20 }, 'demo', NOW);
+    expect(Date.now() - t0).toBeLessThan(110);
+    expect(slow.pending).toBe(true);
+    expect(slow.health.map((h) => h.id)).not.toContain('ci');
+    expect(slow.tiles).toHaveLength(4);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(warm).not.toBeNull();
+    const fast = await homeView({ store, config, plan, planTimeoutMs: 20 }, 'demo', NOW);
+    expect(fast.pending).toBe(false);
+    expect(fast.health.map((h) => h.id)).toContain('ci');
+    expect(calls).toBe(2);
+  });
+
+  it('si la promesa lenta acaba rechazada tras el límite, no queda un rechazo sin atender', async () => {
+    const { config, store } = setup();
+    const unhandled: unknown[] = [];
+    const on = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', on);
+    const plan = { state: async (): Promise<PlanState> => { await new Promise((r) => setTimeout(r, 40)); throw new Error('EAS caído'); } };
+    const v = await homeView({ store, config, plan, planTimeoutMs: 5 }, 'demo', NOW);
+    expect(v.pending).toBe(true);
+    await new Promise((r) => setTimeout(r, 80));
+    process.off('unhandledRejection', on);
+    expect(unhandled).toEqual([]);
+  });
+
+  it('un plan rápido no marca pending', async () => {
+    const { config, store } = setup({ github: { ci: true } });
+    const v = await homeView({ store, config, plan: { state: async () => state() } }, 'demo', NOW);
+    expect(v.pending).toBe(false);
+  });
+});
+
+describe('formato del gasto en «Esta semana»', () => {
+  it('las líneas de gasto usan «≈ 108,71 $», como la cifra y la barra lateral', async () => {
+    const routines = [{ id: 'informe', name: 'Informe', profileId: 'dev', level: 1 as const, title: 'I', prompt: 'x' }];
+    const { config, store, project } = setup({ routines });
+    addRun(store, project, { at: daysAgo(1), cost: 108.71, routineId: 'informe' });
+    const week = (await homeView({ store, config }, 'demo', NOW)).week;
+    expect(week.find((w) => w.label === 'Ejecuciones de agentes')?.value).toBe('1 · ≈ 108,71 $');
+    expect(week.find((w) => w.label === 'Rutina más cara')?.value).toBe('Informe · ≈ 108,71 $');
   });
 });

@@ -19,3 +19,9 @@ export function formatValue(value: number | string | null, format: ValueFormat):
     default: return value.toLocaleString('es-ES', nf(0));
   }
 }
+
+/** Importe en dólares con coma decimal: «≈ 1,52 $»; «≥ 1,52 $» si falta el coste de alguna ejecución. */
+export function formatUsd(n: number | null, partial = false): string {
+  if (n === null) return '—';
+  return `${partial ? '≥' : '≈'} ${n.toFixed(2).replace('.', ',')} $`;
+}

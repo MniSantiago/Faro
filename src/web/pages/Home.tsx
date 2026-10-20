@@ -42,7 +42,7 @@ function Tile({ t }: { t: HomeTile }) {
       <span className="tile-go" aria-hidden="true">↗</span>
       <span className="tile-k">{t.label}</span>
       <span className="tile-v">{formatMetric(t.metric, t.value, t.format)}</span>
-      <span className={`tile-d ${tone}`}>{delta ? `${delta} vs semana pasada` : 'Sin referencia todavía'}</span>
+      {delta && <span className={`tile-d ${tone}`}>{delta} vs semana pasada</span>}
       <Sparkline values={t.spark} tone={tone} />
       {t.metric === 'gasto' && <span className="tile-note">equivalente API</span>}
     </a>
@@ -61,13 +61,20 @@ export function Home() {
     let ignore = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let seq = 0;
+    // Si el plan (EAS, GitHub) tardó y la home salió sin él, se vuelve a pedir una vez a los 5 s, cuando ya estará en la caché.
+    let retried = false;
     setView(null);
     const load = () => {
       timer = undefined;
       // Solo cuenta la respuesta de la última petición: una más lenta y antigua no pisa a la nueva.
       const n = ++seq;
       api.home(project)
-        .then((v) => { if (!ignore && n === seq) { setView(v); setError(null); } })
+        .then((v) => {
+          if (ignore || n !== seq) return;
+          setView(v);
+          setError(null);
+          if (v.pending && !retried) { retried = true; timer = setTimeout(load, 5000); }
+        })
         .catch((e: Error) => { if (!ignore && n === seq) setError(e.message); });
     };
     // Cuando cambia una tarea cambian el titular, la semana y el gasto: como mucho una petición por segundo, aunque los
@@ -111,7 +118,7 @@ export function Home() {
           {view.health.length === 0 ? <p className="muted">Nada que vigilar todavía.</p> : (
             <ul>
               {view.health.map((l) => (
-                <li key={l.id}><span className="hl-label"><Dot tone={l.tone} />{l.label}</span><span className="hl-detail">{l.detail}</span></li>
+                <li key={l.id}><span className="hl-label"><Dot tone={l.tone} />{l.label}</span><span className="hl-detail" title={l.title}>{l.detail}</span></li>
               ))}
             </ul>
           )}

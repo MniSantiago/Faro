@@ -1,10 +1,6 @@
 const dec = (n: number, digits: number) => n.toFixed(digits).replace('.', ',');
 
-/** Importe en dólares con coma decimal: «≈ 1,52 $»; «≥ 1,52 $» si falta el coste de alguna ejecución. */
-export function formatUsd(n: number | null, partial = false): string {
-  if (n === null) return '—';
-  return `${partial ? '≥' : '≈'} ${dec(n, 2)} $`;
-}
+export { formatUsd } from '../shared/format';
 
 /** Tokens abreviados: «999», «57 k», «1 M», «1,5 M». */
 export function formatTokens(n: number | null): string {

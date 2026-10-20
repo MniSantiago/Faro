@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatValue, type ValueFormat } from '../../shared/format';
-import { dayLabel, niceTicks, sparkPath } from '../home';
+import type { HomeMetric } from '../../server/home';
+import type { ValueFormat } from '../../shared/format';
+import { dayLabel, formatMetric, niceTicks, sparkPath } from '../home';
 
 const H = 240;
 const PAD = { top: 12, right: 12, bottom: 26, left: 80 };
@@ -24,7 +25,7 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] 
  * Gráfica de línea de una serie diaria con ejes (días abajo, valores a la izquierda). Al pasar el ratón o tocar, marca el día
  * más cercano con su valor. Los días sin dato cortan la línea.
  */
-export function LineChart({ points, format, zero }: { points: { day: string; value: number | null }[]; format: ValueFormat; zero: boolean }) {
+export function LineChart({ points, metric, format, zero }: { points: { day: string; value: number | null }[]; metric: HomeMetric; format: ValueFormat; zero: boolean }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const values = points.map((p) => p.value);
@@ -58,7 +59,7 @@ export function LineChart({ points, format, zero }: { points: { day: string; val
           {ticks.map((t) => (
             <g key={t}>
               <line className="grid" x1={PAD.left} x2={width - PAD.right} y1={y(t)} y2={y(t)} />
-              <text className="axis" x={PAD.left - 8} y={y(t)} textAnchor="end" dominantBaseline="middle">{formatValue(t, format)}</text>
+              <text className="axis" x={PAD.left - 8} y={y(t)} textAnchor="end" dominantBaseline="middle">{formatMetric(metric, t, format)}</text>
             </g>
           ))}
           {xLabels.map((i) => (
@@ -76,7 +77,7 @@ export function LineChart({ points, format, zero }: { points: { day: string; val
         </svg>
       )}
       <p className="chart-readout" aria-live="polite">
-        {h ? <><strong>{formatValue(h.value, format)}</strong> <span className="muted">{dayLabel(h.day)}</span></>
+        {h ? <><strong>{formatMetric(metric, h.value, format)}</strong> <span className="muted">{dayLabel(h.day)}</span></>
           : <span className="muted">Pasa el ratón o toca la gráfica para ver cada día</span>}
       </p>
     </div>

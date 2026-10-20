@@ -61,7 +61,7 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
         <div>
           <span className="tile-k">{currentLabel(metric, days)}</span>
           <strong className="detail-v">{series ? formatMetric(metric, series.current, format) : '…'}</strong>
-          <span className={`tile-d ${tone}`}>{delta ? `${delta} vs semana pasada` : 'Sin referencia todavía'}</span>
+          {delta && <span className={`tile-d ${tone}`}>{delta} vs semana pasada</span>}
         </div>
         <div className="aso-sorts" role="group" aria-label="Periodo">
           {PERIODS.map((d) => (
@@ -75,7 +75,7 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
         </p>
       )}
       <section className="card">
-        {series ? <LineChart points={series.points} format={format} zero={metric !== 'conversion' && metric !== 'mrr'} />
+        {series ? <LineChart points={series.points} metric={metric} format={format} zero={metric !== 'conversion' && metric !== 'mrr'} />
           : <p className="muted">Cargando…</p>}
       </section>
       {series?.breakdowns.map((b) => (

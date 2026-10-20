@@ -1,4 +1,4 @@
-import { formatValue, STATE_ES, type ValueFormat } from '../shared/format';
+import { formatUsd, formatValue, STATE_ES, type ValueFormat } from '../shared/format';
 import { elapsed, inboxSections } from '../shared/inbox';
 import { getProject } from './config';
 import { CONVERSION_KEY } from './metrics/posthog';
@@ -21,13 +21,19 @@ export interface HomeTile {
   upIsGood: boolean;
 }
 
-export interface HealthLine { id: 'ci' | 'build' | 'store' | 'prs' | 'routines'; label: string; detail: string; tone: 'ok' | 'warn' | 'bad' }
+export interface HealthLine {
+  id: 'ci' | 'build' | 'store' | 'prs' | 'routines'; label: string; detail: string; tone: 'ok' | 'warn' | 'bad';
+  /** Texto completo cuando `detail` va recortado. */
+  title?: string;
+}
 
 export interface HomeView {
   headline: { text: string; detail: string; needCount: number };
   tiles: HomeTile[];
   health: HealthLine[];
   week: { label: string; value: string }[];
+  /** El plan (EAS, GitHub) tardó más que el límite: faltan las líneas que dependen de él; conviene volver a pedir la home. */
+  pending: boolean;
 }
 
 export interface SeriesView {
@@ -45,12 +51,18 @@ export interface SeriesView {
   note: string | null;
 }
 
-export interface HomeDeps { store: Store; config: FaroConfig; plan?: Pick<Plan, 'state'> }
+export interface HomeDeps {
+  store: Store; config: FaroConfig; plan?: Pick<Plan, 'state'>;
+  /** Cuánto se espera a `plan.state` antes de devolver la home sin él (por defecto 1500 ms). */
+  planTimeoutMs?: number;
+}
 
 const METRICS: HomeMetric[] = ['descargas', 'conversion', 'mrr', 'gasto'];
 const FORMAT: Record<HomeMetric, ValueFormat> = { descargas: 'int', conversion: 'percent', mrr: 'money', gasto: 'money' };
 const SPARK_DAYS = 30;
 const TOP = 10;
+const PLAN_TIMEOUT_MS = 1500;
+const REASON_MAX = 80;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 /** Día local `AAAA-MM-DD`. */
@@ -63,7 +75,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const pctChange = (cur: number, before: number) => (before > 0 ? ((cur - before) / before) * 100 : null);
-const money = (usd: number) => formatValue(usd, 'money');
+const money = (usd: number) => formatUsd(usd);
 
 /** Titular de la home por reglas, en orden de prioridad (ver spec «Home»). */
 export function headline(i: { ci: 'success' | 'failure' | 'pending' | null; need: number; unshipped: number; buildInStore: boolean; working: number }): { text: string; detail: string } {
@@ -74,7 +86,8 @@ export function headline(i: { ci: 'success' | 'failure' | 'pending' | null; need
   const detail = [
     i.ci ? { success: 'CI en verde', failure: 'CI en rojo', pending: 'CI en curso' }[i.ci] : null,
     i.working > 0 ? plural(i.working, 'agente trabajando', 'agentes trabajando') : null,
-    i.need > 0 ? (i.need === 1 ? '1 tarea te espera' : `${i.need} tareas te esperan`) : null,
+    // Si el titular ya es el de lo que espera, el detalle no repite el recuento.
+    i.need > 0 && i.ci === 'failure' ? (i.need === 1 ? '1 tarea te espera' : `${i.need} tareas te esperan`) : null,
   ].filter(Boolean).join(' · ');
   return { text, detail };
 }
@@ -154,6 +167,12 @@ const OUTCOME_ES: Record<RunOutcome, string> = {
   done: 'terminada', blocked: 'bloqueada', error: 'terminó con error', timeout: 'tiempo agotado', rate_limited: 'límite de uso',
   auth: 'sin sesión de Claude', interrupted: 'interrumpida', budget: 'tope de gasto alcanzado',
 };
+/** Primera frase del motivo, de 80 caracteres como mucho (con «…» si se corta). */
+export function shortReason(reason: string): string {
+  const first = reason.trim().split(/\n|(?<=[.!?])\s/)[0].trim();
+  return first.length > REASON_MAX ? `${first.slice(0, REASON_MAX - 1).trimEnd()}…` : first;
+}
+
 const REJECTED = new Set(['REJECTED', 'METADATA_REJECTED', 'DEVELOPER_REJECTED']);
 
 /** Nombre de una rutina de cualquier proyecto (el gasto es de todo Faro). */
@@ -211,13 +230,21 @@ function healthLines(d: HomeDeps, p: ProjectConfig, st: PlanState | null, now: D
   }
   if (p.routines?.length) {
     // Una rutina falló si su última ejecución de los 7 días no terminó bien.
-    const last = new Map<string, { outcome: RunOutcome; reason: string | null }>();
+    const last = new Map<string, { outcome: RunOutcome; reason: string | null; endedAt: string }>();
     for (const r of store.routineRuns(p.id, from7)) last.set(r.routineId, r);
-    const failed = [...last].filter(([, r]) => r.outcome !== 'done').map(([id, r]) =>
-      `${routineName(d.config, id)}: ${r.reason?.split('\n')[0].trim().slice(0, 80) || OUTCOME_ES[r.outcome] || r.outcome}`);
-    lines.push(failed.length
-      ? { id: 'routines', label: 'Rutinas', detail: failed.join('; '), tone: 'bad' }
-      : { id: 'routines', label: 'Rutinas', detail: 'Ninguna falló en 7 días', tone: 'ok' });
+    const describe = (id: string, r: { outcome: RunOutcome; reason: string | null }) => ({
+      short: `${routineName(d.config, id)}: ${(r.reason && shortReason(r.reason)) || OUTCOME_ES[r.outcome] || r.outcome}`,
+      full: `${routineName(d.config, id)}: ${r.reason?.trim() || OUTCOME_ES[r.outcome] || r.outcome}`,
+    });
+    const failed = [...last].filter(([, r]) => r.outcome !== 'done').sort(([, a], [, b]) => (a.endedAt < b.endedAt ? 1 : -1));
+    if (!failed.length) lines.push({ id: 'routines', label: 'Rutinas', detail: 'Ninguna falló en 7 días', tone: 'ok' });
+    else {
+      const [recent] = failed.map(([id, r]) => describe(id, r));
+      const all = failed.map(([id, r]) => describe(id, r).full);
+      lines.push(failed.length === 1
+        ? { id: 'routines', label: 'Rutinas', detail: recent.short, title: recent.full, tone: 'bad' }
+        : { id: 'routines', label: 'Rutinas', detail: `${failed.length} rutinas fallaron · la más reciente, ${recent.short}`, title: all.join('\n'), tone: 'bad' });
+    }
   }
   return lines;
 }
@@ -244,8 +271,16 @@ function weekLines(d: HomeDeps, p: ProjectConfig, now: Date, from7: string): Hom
 export async function homeView(d: HomeDeps, projectId: string, now: Date): Promise<HomeView> {
   const p = getProject(d.config, projectId);
   let st: PlanState | null = null;
+  let pending = false;
   if (d.plan) {
-    try { st = await d.plan.state(projectId); } catch { st = null; }
+    // EAS y GitHub pueden tardar segundos: pasado el límite se devuelve la home sin el plan. La promesa sigue y deja el plan
+    // en la caché de `Plan`, así que la siguiente llamada ya lo encuentra.
+    const slow = d.plan.state(projectId).catch(() => null);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>((resolve) => { timer = setTimeout(() => resolve('late'), d.planTimeoutMs ?? PLAN_TIMEOUT_MS); });
+    const got = await Promise.race([slow, late]);
+    clearTimeout(timer);
+    if (got === 'late') pending = true; else st = got;
   }
   // Los 7 días naturales incluido hoy, como el gasto de la barra lateral.
   const from7 = dayStart(now, 6).toISOString();
@@ -259,6 +294,7 @@ export async function homeView(d: HomeDeps, projectId: string, now: Date): Promi
     tiles: METRICS.map((m) => tile(d.store, p, m, now)),
     health: healthLines(d, p, st, now, from7),
     week: weekLines(d, p, now, from7),
+    pending,
   };
 }
 

@@ -35,7 +35,7 @@ h1 { font-size: 22px; } h2 { font-size: 16px; margin-top: 28px; }
 .badge.working { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .badge.done, .badge.discarded { color: var(--muted); }
 .meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.callout { border: 1px solid var(--accent); border-radius: 8px; padding: 4px 16px 16px; margin-top: 20px; background: var(--card); }
+.callout { border: 1px solid var(--accent-text); border-radius: 8px; padding: 4px 16px 16px; margin-top: 20px; background: var(--card); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 textarea, input, select { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
 .form { display: grid; gap: 14px; max-width: 640px; }
@@ -114,7 +114,7 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 .opt { font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--chip-line); background: var(--card); color: var(--fg); cursor: pointer; }
 .opt.on { border-color: var(--accent-text); background: var(--accent); color: var(--on-accent); }
 .meta code, .desc { overflow-wrap: anywhere; }
-.notice { padding: 10px 14px; border: 1px solid var(--accent); border-radius: 8px; }
+.notice { padding: 10px 14px; border: 1px solid var(--accent-text); border-radius: 8px; }
 .notice button { font: inherit; background: none; border: 0; color: var(--accent-text); cursor: pointer; padding: 0; text-decoration: underline; }
 .side h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 24px 0 8px; }
 .side h2:first-child { margin-top: 0; }
@@ -339,7 +339,7 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .fab { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; cursor: pointer; padding: 0; -webkit-tap-highlight-color: transparent; }
   .fab[aria-expanded="true"] .ico { transform: rotate(45deg); }
   .fab .ico { transition: transform .15s; }
-  .plus-menu { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 170px; display: grid; padding: 6px; border-radius: 12px;
+  .plus-menu { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 170px; max-height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); overflow-y: auto; display: grid; padding: 6px; border-radius: 12px;
     border: 1px solid var(--line); background: var(--card); box-shadow: 0 8px 24px rgb(0 0 0 / .18); }
   .plus-menu a { padding: 10px 12px; border-radius: 8px; text-decoration: none; font-size: 15px; }
   .plus-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
@@ -383,6 +383,7 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 .ctabs button { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 0; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .ctabs button.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
 .config-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.cback { display: none; }
 .config-ignored { margin-bottom: 14px; font-size: 14px; }
 .config-ignored p { margin: 6px 0; }
 .clist { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: grid; }
@@ -448,6 +449,10 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .rform.ro dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .rform.ro dd { margin-bottom: 8px; }
   .config-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Sin elemento elegido, solo la lista; con uno, solo su formulario y el enlace para volver. */
+  .config-grid:not(.has-sel) > .cdetail, .config-grid.has-sel > .clist { display: none; }
+  .config-grid:not(.has-sel) > .cback { display: none; }
+  .cback { display: block; justify-self: start; padding: 6px 0; }
   .rform { padding: 14px; }
   .rform .r2 { grid-template-columns: minmax(0, 1fr); }
   .rform-bar .origin { flex-basis: 100%; }
