@@ -14,8 +14,8 @@ Faro es un panel de mando que instalas en tu máquina para orquestar agentes de 
   | Nivel | Puede hacer solo | Necesita tu aprobación |
   |---|---|---|
   | 1. Solo lectura | Leer el repo y escribir un informe | Cualquier escritura en el repo |
-  | 2. Borrador (por defecto) | Escribir en su worktree | Merge, push, publicar versión |
-  | 3. Merge automático | Integrar en la rama base si las comprobaciones pasan | Push, publicar versión |
+  | 2. Integra si pasan los tests (por defecto) | Escribir en su worktree e integrar en la rama base si se ejecutó al menos una comprobación y todas pasaron; si no, la tarea espera tu revisión | Push, publicar versión |
+  | 3. Integra si pasan los tests | Lo mismo que el nivel 2; la única diferencia es que las rutinas y perfiles de nivel 3–4 no se pueden editar desde un dispositivo vinculado | Push, publicar versión |
   | 4. Autónomo | Push y lanzar un build | Publicar en tiendas o redes (siempre) |
 
 - **Revisión.** Diff, comprobaciones, aprobar e integrar (fast-forward, o PR con squash al pasar el CI), subir o parar un agente en marcha.

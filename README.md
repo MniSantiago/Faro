@@ -16,8 +16,8 @@ Faro is a self-hosted control panel for running [Claude Code](https://claude.com
   | Level | Can do on its own | Needs your approval |
   |---|---|---|
   | 1. Read-only | Read the repo and write a report | Any write to the repo |
-  | 2. Draft (default) | Write in its worktree | Merge, push, release |
-  | 3. Auto-merge | Merge to the base branch when checks pass | Push, release |
+  | 2. Merge if checks pass (default) | Write in its worktree and merge to the base branch if at least one check ran and all passed; otherwise the task waits for your review | Push, release |
+  | 3. Merge if checks pass | Same as level 2; the only difference is that routines and profiles at level 3–4 can't be edited from a paired device | Push, release |
   | 4. Autonomous | Push and start a build | Publishing to stores or social media (always) |
 
 - **Review flow.** Diff, checks, approve and merge (fast-forward, or PR + squash once CI passes), push, or stop a running agent.
