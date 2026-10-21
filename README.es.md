@@ -90,7 +90,7 @@ security add-generic-password -U -s faro -a posthog -w
 
 o, en cualquier sistema, como variable de entorno al arrancar Faro (`FARO_SECRET_POSTHOG`, `FARO_SECRET_REVENUECAT`, `FARO_SECRET_ASC_KEY_ID`, `FARO_SECRET_ASC_ISSUER`, `FARO_SECRET_ASC_P8`, `FARO_SECRET_GITHUB_LECTURA`). Faro las quita de su entorno al arrancar para que no las hereden los agentes ni las comprobaciones.
 
-Con varios proyectos, cada clave de métricas (`revenuecat`, `posthog`, `asc-*`) también puede ir por proyecto: cuenta del llavero `<nombre>:<proyecto>` (p. ej. `revenuecat:tienda`) o la variable `FARO_SECRET_<NOMBRE>_<PROYECTO>` (en mayúsculas, `-` y `:` pasan a `_`, p. ej. `FARO_SECRET_REVENUECAT_TIENDA`). Si un proyecto no tiene la suya, usa la general: así los proyectos pueden compartir la clave de App Store Connect o de PostHog y tener cada uno su RevenueCat.
+Con varios proyectos, cada clave de métricas (`revenuecat`, `posthog`, `asc-*`) también puede ir por proyecto: cuenta del llavero `<nombre>:<proyecto>` (p. ej. `revenuecat:tienda`) o la variable `FARO_SECRET_<NOMBRE>_<PROYECTO>` (en mayúsculas, `-` y `:` pasan a `_`, p. ej. `FARO_SECRET_REVENUECAT_TIENDA`). Si un proyecto no tiene la suya, usa la general: así los proyectos pueden compartir la clave de App Store Connect o de PostHog y tener cada uno su RevenueCat (la página de Métricas solo propone la cuenta por proyecto para RevenueCat).
 
 ## Varios proyectos
 

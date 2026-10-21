@@ -92,7 +92,7 @@ security add-generic-password -U -s faro -a posthog -w
 
 or, on any OS, as an environment variable when starting Faro (`FARO_SECRET_POSTHOG`, `FARO_SECRET_REVENUECAT`, `FARO_SECRET_ASC_KEY_ID`, `FARO_SECRET_ASC_ISSUER`, `FARO_SECRET_ASC_P8`, `FARO_SECRET_GITHUB_LECTURA`). Faro removes them from its environment at startup so agents and checks never inherit them.
 
-With several projects, each metrics secret (`revenuecat`, `posthog`, `asc-*`) can also be given per project: Keychain account `<name>:<project>` (e.g. `revenuecat:tienda`) or the variable `FARO_SECRET_<NAME>_<PROJECT>` (uppercase, `-` and `:` become `_`, e.g. `FARO_SECRET_REVENUECAT_TIENDA`). If a project has none of its own, it uses the general one, so projects can share an App Store Connect or PostHog key and keep separate RevenueCat keys.
+With several projects, each metrics secret (`revenuecat`, `posthog`, `asc-*`) can also be given per project: Keychain account `<name>:<project>` (e.g. `revenuecat:tienda`) or the variable `FARO_SECRET_<NAME>_<PROJECT>` (uppercase, `-` and `:` become `_`, e.g. `FARO_SECRET_REVENUECAT_TIENDA`). If a project has none of its own, it uses the general one, so projects can share an App Store Connect or PostHog key and keep separate RevenueCat keys (the Metrics page only suggests the per-project account for RevenueCat).
 
 ## Several projects
 
