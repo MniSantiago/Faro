@@ -93,7 +93,7 @@ export interface ProjectConfig {
   aso?: AsoConfig;
   /** Repos del proyecto (en el archivo, o esto o los campos sueltos); tras normalizar siempre está y no es vacío. */
   repos?: RepoConfig[];
-  /** Carpeta común de los repos (p. ej. Acme). */
+  /** Carpeta común de los repos (p. ej. la que contiene los repos de un proyecto multi-repo). */
   rootPath?: string;
   /** Copia el CLAUDE.md de rootPath a la carpeta de cada tarea multi-repo (por defecto, no). */
   copyRootClaudeMd?: boolean;

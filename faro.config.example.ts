@@ -1,15 +1,17 @@
 // Copy this file to `faro.config.ts` (ignored by git) and adapt it to your projects.
 // Copia este archivo a `faro.config.ts` (git lo ignora) y adáptalo a tus proyectos.
-import type { FaroConfig } from './src/server/types';
+import type { FaroConfigInput } from './src/server/types';
 
-const config: FaroConfig = {
+const config: FaroConfigInput = {
   // Nombre del panel en la web.
   title: 'Faro',
   host: '127.0.0.1',
   port: 3200,
   dataDir: '~/.faro',
   claudeBin: 'claude',
-  maxConcurrentRuns: 2,
+  // Optional global cap on simultaneous agents across all projects (each project has its own limit, 2 by default).
+  // Tope global opcional de agentes simultáneos entre todos los proyectos (cada proyecto tiene su límite, 2 por defecto).
+  // maxConcurrentRuns: 3,
   // Contacto para los avisos push (VAPID): una URL o un `mailto:`.
   pushContact: 'mailto:you@example.com',
   // Acceso remoto opcional por Tailscale (`tailscale serve --bg --https=443 http://127.0.0.1:3200`).
@@ -29,6 +31,12 @@ const config: FaroConfig = {
       baseBranch: 'main',
       remote: 'origin',
       worktreesDir: '~/.faro/worktrees/demo',
+      // Agentes simultáneos de este proyecto (por defecto 2).
+      maxConcurrentRuns: 2,
+      // Instrucciones del proyecto para todos los perfiles (van tras las del perfil, bajo «Sobre Demo:»),
+      // y notas que solo recibe un perfil en este proyecto.
+      // instructions: 'Demo es una app web en React; el código está en src/ y los tests en test/.',
+      // profileNotes: { calidad: 'En Demo los tests de integración tardan: ejecútalos solo si tocas src/api/.' },
       // GitHub con `gh`: vigila el CI de main y cada tarea se integra por PR (squash al pasar el CI).
       // ciProfile: perfil de las tareas que arreglan el CI.
       // github: { ci: true, prs: true, ciProfile: 'dev' },
@@ -90,6 +98,37 @@ const config: FaroConfig = {
         },
       ],
     },
+    // A project with several repos: each task picks which ones it works on (all by default) and they are merged
+    // together or not at all. Repo fields (path, baseBranch, remote, prepare, exclude, checks, release) go per repo.
+    // Un proyecto con varios repos: cada tarea elige en cuáles trabaja (por defecto, en todos) y se integran todos
+    // juntos o ninguno. Los campos de repo (path, baseBranch, remote, prepare, exclude, checks, release) van por repo.
+    // {
+    //   id: 'tienda',
+    //   name: 'Tienda',
+    //   prefix: 'TIE',
+    //   worktreesDir: '~/.faro/worktrees/tienda',
+    //   maxConcurrentRuns: 2,
+    //   // Carpeta común de los repos: los agentes la pueden leer pero no escribir en ella.
+    //   rootPath: '~/code/tienda',
+    //   // Copia ~/code/tienda/CLAUDE.md a la carpeta de cada tarea (por defecto, no).
+    //   // copyRootClaudeMd: true,
+    //   repos: [
+    //     {
+    //       id: 'app', name: 'App', path: '~/code/tienda/app', baseBranch: 'main', remote: 'origin',
+    //       prepare: ['ln -sfn "$HOME/code/tienda/app/node_modules" node_modules'], exclude: ['node_modules'],
+    //       checks: [{ name: 'Tests', command: 'npm test' }],
+    //     },
+    //     {
+    //       id: 'api', name: 'API', path: '~/code/tienda/api', baseBranch: 'main', remote: 'origin',
+    //       prepare: ['ln -sfn "$HOME/code/tienda/api/node_modules" node_modules'], exclude: ['node_modules'],
+    //       checks: [{ name: 'Tests', command: 'npm test' }],
+    //     },
+    //   ],
+    //   // En la carpeta de cada tarea hay una subcarpeta por repo (app/, api/), cada una un worktree en la rama de la tarea.
+    //   instructions: 'Tienda tiene la app en app/ y la API en api/; si cambias un endpoint, actualiza también su cliente en app/.',
+    //   // Rutinas: `repos` limita sus tareas a algunos repos (si falta, todos).
+    //   routines: [],
+    // },
   ],
   profiles: [
     {

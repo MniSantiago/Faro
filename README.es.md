@@ -17,6 +17,7 @@ Faro es un panel de mando que instalas en tu máquina para orquestar agentes de 
   | 4. Autónomo | Push y lanzar un build | Publicar en tiendas o redes (siempre) |
 
 - **Revisión.** Diff, comprobaciones, aprobar e integrar (fast-forward, o PR con squash al pasar el CI), subir o parar un agente en marcha.
+- **Varios proyectos, varios repos.** Cada proyecto es independiente (tareas, rutinas, límite de agentes, gasto, avisos, claves); solo los perfiles son comunes. Un proyecto puede tener varios repos: cada tarea elige en cuáles trabaja y se integran todos juntos o ninguno.
 - **Perfiles.** Roles con sus instrucciones, nivel por defecto y tiempo máximo (coordinador, desarrollo, calidad, análisis…). El coordinador divide un objetivo en subtareas.
 - **Rutinas.** Tareas periódicas con cron: revisión de bugs, auditoría de dependencias, resumen del estado del proyecto…
 - **GitHub (opcional, con `gh`).** Vigila el CI de la rama base y crea una tarea de arreglo cuando falla; integra cada tarea por PR.
@@ -65,14 +66,19 @@ Toda tu configuración vive en `faro.config.ts` (mira [`faro.config.example.ts`]
 | `profiles` | Roles: instrucciones de cada agente, nivel por defecto y tiempo máximo; opcionales `model`, `effort` (`--effort`), `isolation` (`minimal` por defecto: los agentes cargan solo la configuración de Claude del repo, no tus plugins, skills ni CLAUDE.md global; `user` también los carga) y `maxBudgetUsd` (tope de gasto por ejecución: al alcanzarlo, la tarea se bloquea). |
 | `coordinatorProfile` | Perfil de los chats y de dividir objetivos en subtareas (por defecto `coordinador`). |
 | `projects[].repoPath`, `baseBranch`, `prefix`, `startNumber` | Qué repo, qué rama y cómo se numeran las tareas (`DEM-1`…). |
+| `projects[].repos` | En vez de `repoPath`/`baseBranch`/`remote`, una lista de repos (`id`, `name`, `path`, `baseBranch`, `remote` y, por repo, `prepare`, `exclude`, `checks`, `release`). Ver [Varios repos en un proyecto](#varios-repos-en-un-proyecto). |
+| `projects[].rootPath`, `copyRootClaudeMd` | Carpeta común de un proyecto multi-repo (los agentes pueden leerla pero no escribir en ella) y si su `CLAUDE.md` se copia a la carpeta de cada tarea (por defecto, no). |
+| `projects[].instructions`, `profileNotes` | Instrucciones del proyecto que recibe cada perfil tras las suyas (bajo «Sobre <proyecto>:») y notas que solo recibe un perfil en este proyecto (`{ <idPerfil>: 'texto' }`). Deja los perfiles genéricos y pon aquí lo propio del proyecto. |
+| `projects[].maxConcurrentRuns` | Agentes de este proyecto a la vez (por defecto 2). Un proyecto lleno no frena a los demás. |
 | `projects[].prepare`, `exclude` | Comandos para cada worktree nuevo (p. ej. enlazar `node_modules`) y rutas que nunca se commitean. |
 | `projects[].checks` | Comandos que tiene que pasar una tarea antes de revisión; `whenChanged` limita uno a una carpeta. |
-| `projects[].routines` | Tareas periódicas con cron, perfil, nivel y prompt (`{fecha}` es la fecha del día); `maxBudgetUsd` manda sobre el tope del perfil. |
+| `projects[].routines` | Tareas periódicas con cron, perfil, nivel y prompt (`{fecha}` es la fecha del día); `maxBudgetUsd` manda sobre el tope del perfil; `repos` limita una rutina multi-repo a algunos repos. |
 | `projects[].github` | `ci` vigila el CI, `prs` integra por PR y `ciProfile` elige quién arregla un CI roto. |
 | `projects[].metrics` | RevenueCat, App Store Connect y PostHog; `posthogFunnel` define las etapas, filtros y la tarjeta de conversión de tu embudo. |
 | `projects[].aso`, `release` | Keywords de la App Store y comandos de build y envío tras integrar (EAS por defecto). |
 | `retryWatchdog` | Cuánto sigue reintentando la CLI ante sobrecargas y límites de uso (activado, 5 min como máximo) antes de que Faro pause la cola. |
-| `maxConcurrentRuns`, `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Servidor y ejecución. |
+| `maxConcurrentRuns` | Tope global opcional de agentes entre todos los proyectos. Sin él, cada proyecto solo sigue su propio límite. |
+| `host`, `port`, `dataDir`, `allowedHosts`, `sandbox` | Servidor y ejecución. |
 
 El menú solo enseña Métricas y ASO si algún proyecto las usa, y el Plan solo enseña lo de la tienda si el proyecto tiene `release`.
 
@@ -83,6 +89,25 @@ security add-generic-password -U -s faro -a posthog -w
 ```
 
 o, en cualquier sistema, como variable de entorno al arrancar Faro (`FARO_SECRET_POSTHOG`, `FARO_SECRET_REVENUECAT`, `FARO_SECRET_ASC_KEY_ID`, `FARO_SECRET_ASC_ISSUER`, `FARO_SECRET_ASC_P8`, `FARO_SECRET_GITHUB_LECTURA`). Faro las quita de su entorno al arrancar para que no las hereden los agentes ni las comprobaciones.
+
+Con varios proyectos, cada clave de métricas (`revenuecat`, `posthog`, `asc-*`) también puede ir por proyecto: cuenta del llavero `<nombre>:<proyecto>` (p. ej. `revenuecat:tienda`) o la variable `FARO_SECRET_<NOMBRE>_<PROYECTO>` (en mayúsculas, `-` y `:` pasan a `_`, p. ej. `FARO_SECRET_REVENUECAT_TIENDA`). Si un proyecto no tiene la suya, usa la general: así los proyectos pueden compartir la clave de App Store Connect o de PostHog y tener cada uno su RevenueCat.
+
+## Varios proyectos
+
+Con más de un proyecto aparece un selector en la barra lateral. Toda la web (inicio, bandeja, chats, historial, rutinas, plan, métricas, ASO, gasto) muestra solo el proyecto actual; se recuerda por dispositivo y un enlace puede fijarlo con `?p=<id>`. Al abrir una tarea se cambia a su proyecto. En **Dispositivos**, cada dispositivo emparejado elige de qué proyectos recibe avisos (por defecto, de todos), y el título del aviso lleva el nombre del proyecto.
+
+### Varios repos en un proyecto
+
+Usa `repos` en vez de `repoPath` (mira el proyecto `tienda` comentado en [`faro.config.example.ts`](faro.config.example.ts)). Las tareas comparten numeración y, al crear una, marcas en qué repos trabaja (por defecto, en todos). Entonces:
+
+- La tarea tiene una carpeta `worktreesDir/<rama>/` con un worktree por repo (`<rama>/<idRepo>/`), todos en la misma rama. El agente trabaja en esa carpeta y sabe qué subcarpeta es cada repo.
+- `prepare`, `exclude` y `checks` se ejecutan por repo, dentro de su worktree; `whenChanged` es relativo al repo y no se corren las comprobaciones de los repos sin cambios.
+- **La integración es atómica**: Faro actualiza primero cada repo con su rama base; si alguno choca, no se fusiona ninguno y se crea una tarea de conflicto solo con los repos que chocan. Dos tareas del mismo proyecto nunca se integran a la vez.
+- **El push** va repo a repo y salta los que no tienen nada nuevo. Si uno falla, los demás quedan subidos, el error dice cuál falta y reintentar sube solo lo que queda.
+- Faro puede subir la rama base aunque no esté en ningún checkout (p. ej. si tus checkouts están en ramas de feature): fusiona lo nuevo del remoto en un worktree temporal.
+- El sandbox protege los repos y worktrees de todos los demás proyectos, y `rootPath` es de solo lectura.
+- `release` solo puede ir en un repo; una tarea con lanzamiento debe incluir ese repo.
+- Por ahora un proyecto multi-repo no admite `github.prs` ni `github.ci`: las tareas se integran en local tras las comprobaciones de Faro.
 
 ## Datos
 
