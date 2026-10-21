@@ -2,7 +2,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { getProject } from '../src/server/config';
 import { integrate, type IntegrateDeps } from '../src/server/integrate';
 import { Orchestrator } from '../src/server/orchestrator';
@@ -10,7 +10,7 @@ import { Runner, type RunResult } from '../src/server/runner/runner';
 import { Store } from '../src/server/store';
 import type { FaroConfig, Level } from '../src/server/types';
 import { GitWorkspaces } from '../src/server/workspaces';
-import { fixture, gitSync, makeConfig, makeRepo, tmpDir, until } from './helpers';
+import { fixture, gitSync, makeConfig, makeMultiConfig, makeRepo, tmpDir, until, withoutRepos } from './helpers';
 
 function setup(env: Record<string, string>, over: Partial<FaroConfig> = {}, wsOver: Partial<GitWorkspaces> = {}, releases?: IntegrateDeps['releases']) {
   const repo = makeRepo();
@@ -20,9 +20,9 @@ function setup(env: Record<string, string>, over: Partial<FaroConfig> = {}, wsOv
   const timers: { ms: number; fn: () => void }[] = [];
   const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
   const orch = new Orchestrator({
-    store, config, bus, runner, workspaces: Object.assign(new GitWorkspaces(), wsOver), runChecks, releases, setTimer: (_fn, ms) => timers.push({ ms, fn: _fn }),
+    store, config, bus, runner, workspaces: Object.assign(new GitWorkspaces(), wsOver), runChecks: runTaskChecks, releases, setTimer: (_fn, ms) => timers.push({ ms, fn: _fn }),
   });
-  const project = getProject(config, 'demo');
+  const project = config.projects[0];
   const add = (title = 'Crear hola', level: Level = 2) => {
     const t = store.createTask(project, { title, description: '', profileId: 'dev', level });
     orch.enqueue(t.id);
@@ -110,7 +110,7 @@ describe('Orchestrator', () => {
   it('cambios fuera de lo que cubren los tests (todos omitidos) se quedan en revisión', async () => {
     const repo = makeRepo();
     const base = makeConfig(repo);
-    base.projects[0].checks = [{ name: 'App · tests', command: 'true', whenChanged: 'app/' }];
+    base.projects[0] = { ...withoutRepos(base.projects[0]), checks: [{ name: 'App · tests', command: 'true', whenChanged: 'app/' }] };
     const { store, orch, add } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' }, { projects: base.projects });
     const id = add('Crear hola', 3);
     await orch.waitIdle();
@@ -133,7 +133,7 @@ describe('Orchestrator', () => {
   it('nivel 3 con una comprobación en rojo se queda en revisión', async () => {
     const repo = makeRepo();
     const base = makeConfig(repo);
-    base.projects[0].checks = [{ name: 'rota', command: 'exit 1' }];
+    base.projects[0] = { ...withoutRepos(base.projects[0]), checks: [{ name: 'rota', command: 'exit 1' }] };
     const { store, orch, add } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' }, { projects: base.projects });
     const id = add('Crear hola', 3);
     await orch.waitIdle();
@@ -266,7 +266,7 @@ describe('Orchestrator', () => {
   it('error al preparar el worktree → bloqueada con el motivo', async () => {
     const repo = makeRepo();
     const base = makeConfig(repo);
-    base.projects[0].prepare = ['exit 9'];
+    base.projects[0] = { ...withoutRepos(base.projects[0]), prepare: ['exit 9'] };
     const { store, orch, add } = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl') }, { projects: base.projects });
     const id = add();
     await orch.waitIdle();
@@ -525,7 +525,7 @@ describe('Orchestrator · resultados tras una parada', () => {
       },
       cancel: () => {},
     };
-    const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks, setTimer: () => {} });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks: runTaskChecks, setTimer: () => {} });
     const t = store.createTask(project, { title: 'T', description: '', profileId: 'dev', level: 2 });
     orch.enqueue(t.id);
     return { store, orch, id: t.id };
@@ -779,5 +779,184 @@ describe('Orchestrator · revisión final de la fase 2', () => {
     store.markDelivered([nuevo.id]);
     orch.recover();
     expect(store.listUndelivered(t.id).map((c) => c.id)).toEqual([nuevo.id]);
+  });
+});
+
+describe('Orchestrator · varios repos', () => {
+  function multiSetup(env: Record<string, string>) {
+    const config = makeMultiConfig();
+    const store = new Store(':memory:');
+    const bus = new Bus();
+    const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks: runTaskChecks, setTimer: () => {} });
+    const project = getProject(config, 'multi');
+    const repo = (id: string) => project.repos!.find((r) => r.id === id)!.path;
+    return { config, store, orch, project, repo, env };
+  }
+
+  it('una tarea de dos repos corre en la carpeta de la tarea, commitea en los dos y queda en revisión con el diff de ambos', async () => {
+    const { store, orch, project, repo } = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'a/x.txt', FAKE_WRITE_ARTIFACT: 'b/y.txt' });
+    // Nivel 1: con las comprobaciones en verde no se integra sola (la integración multi-repo es otra tarea).
+    const t = store.createTask(project, { title: 'Dos repos', description: '', profileId: 'dev', level: 1 });
+    orch.enqueue(t.id);
+    await orch.waitIdle();
+    const done = store.getTask(t.id);
+    expect(done.state).toBe('review');
+    expect(done.worktreePath).toBe(path.join(project.worktreesDir, done.branch!));
+    expect(gitSync(repo('a'), 'show', `${done.branch}:x.txt`)).toBe('hola\n');
+    expect(gitSync(repo('b'), 'show', `${done.branch}:y.txt`)).toBe('x');
+    const diff = store.listArtifacts(t.id).find((a) => a.kind === 'diff')!;
+    expect(diff.label).toBe('Diff (2 archivos)');
+    const patch = readFileSync(diff.path, 'utf8');
+    expect(patch).toContain('a/x.txt');
+    expect(patch).toContain('b/y.txt');
+    expect(store.listArtifacts(t.id).filter((a) => a.kind === 'check').map((a) => a.label)).toEqual(['a · ca: ok', 'b · cb: ok']);
+  });
+
+  it('una tarea de un solo repo del proyecto solo crea ese worktree', async () => {
+    const f = files();
+    const { store, orch, project, repo } = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'b/y.txt', FAKE_ARGS_OUT: f.args });
+    const t = store.createTask(project, { title: 'Solo b', description: '', profileId: 'dev', level: 1, repos: ['b'] });
+    orch.enqueue(t.id);
+    await orch.waitIdle();
+    const done = store.getTask(t.id);
+    expect(done.state).toBe('review');
+    expect(existsSync(path.join(done.worktreePath!, 'a'))).toBe(false);
+    expect(gitSync(repo('b'), 'show', `${done.branch}:y.txt`)).toBe('hola\n');
+    expect(store.listArtifacts(t.id).filter((a) => a.kind === 'check').map((a) => a.label)).toEqual(['b · cb: ok']);
+    // El prompt de sistema solo nombra los repos de la tarea.
+    const args: string[] = readJsonl(f.args)[0];
+    const sys = args[args.indexOf('--append-system-prompt') + 1];
+    expect(sys).toContain('Tu carpeta tiene un repo por subcarpeta: b/ (b).');
+  });
+
+  it('si falta el worktree de un repo, lo rehace sobre la misma rama', async () => {
+    const { store, orch, project, repo, env } = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'a/x.txt' });
+    const t = store.createTask(project, { title: 'Rehacer', description: '', profileId: 'dev', level: 1 });
+    orch.enqueue(t.id);
+    await orch.waitIdle();
+    const first = store.getTask(t.id);
+    gitSync(repo('b'), 'worktree', 'remove', '--force', path.join(first.worktreePath!, 'b'));
+    env.FAKE_WRITE = 'b/y.txt';
+    store.addComment(t.id, 'user', 'sigue', { pending: true });
+    orch.enqueue(t.id);
+    await orch.waitIdle();
+    const t2 = store.getTask(t.id);
+    expect(t2.state).toBe('review');
+    expect(t2.worktreePath).toBe(first.worktreePath);
+    expect(gitSync(repo('b'), 'show', `${first.branch}:y.txt`)).toBe('hola\n');
+  });
+
+  it('conflicto: Faro hace merge de la base en cada repo y lista los archivos con el repo delante', async () => {
+    const f = files();
+    const { store, orch, project, repo, env } = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'a/x.txt' });
+    const parent = store.createTask(project, { title: 'Padre', description: '', profileId: 'dev', level: 1 });
+    orch.enqueue(parent.id);
+    await orch.waitIdle();
+    const p = store.getTask(parent.id);
+    // main de a crea un x.txt distinto: el merge de la base en la rama deja a/x.txt en conflicto; b queda limpio.
+    writeFileSync(path.join(repo('a'), 'x.txt'), 'otra cosa\n');
+    gitSync(repo('a'), 'add', '.');
+    gitSync(repo('a'), 'commit', '-qm', 'main crea x distinto');
+    const child = store.createTask(project, { title: 'Conflicto', description: '', profileId: 'dev', level: 1, parentId: parent.id });
+    store.updateTask(child.id, { branch: p.branch, worktreePath: p.worktreePath });
+    env.FAKE_STDIN_OUT = f.stdin;
+    orch.enqueue(child.id);
+    await orch.waitIdle();
+    const prompt = JSON.stringify(readJsonl(f.stdin)[0]);
+    expect(prompt).toContain('han quedado conflictos en:');
+    expect(prompt).toContain('- a/x.txt');
+    expect(store.getTask(child.id).state).toBe('review');
+  });
+
+  it('chat: carpeta con un worktree por repo; si desaparece, la recrea', async () => {
+    const { store, orch, project } = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl') });
+    const chat = store.createTask(project, { title: 'Hola', description: '', profileId: 'dev', level: 1, kind: 'chat' });
+    store.addComment(chat.id, 'user', 'hola', { pending: true });
+    orch.enqueue(chat.id);
+    await orch.waitIdle();
+    const wt = store.getTask(chat.id).worktreePath!;
+    expect(wt).toBe(path.join(project.worktreesDir, `${chat.id}-chat`));
+    for (const id of ['a', 'b']) expect(existsSync(path.join(wt, id, 'README.md'))).toBe(true);
+    rmSync(path.join(wt, 'b'), { recursive: true, force: true });
+    store.addComment(chat.id, 'user', 'sigue', { pending: true });
+    orch.enqueue(chat.id);
+    await orch.waitIdle();
+    expect(store.getTask(chat.id).state).toBe('idle');
+    for (const id of ['a', 'b']) expect(existsSync(path.join(wt, id, 'README.md'))).toBe(true);
+  });
+});
+
+describe('Orchestrator · límite de agentes por proyecto', () => {
+  /** Proyectos `p1` y `p2` (cada uno con su repo y su límite) sobre el montaje de siempre. */
+  function dos(limits: [number | undefined, number | undefined], global?: number) {
+    const data = tmpDir('faro-data-');
+    const proj = (id: string, prefix: string, maxConcurrentRuns?: number) => ({
+      id, name: id, prefix, repoPath: makeRepo(), baseBranch: 'main', remote: 'origin',
+      worktreesDir: path.join(data, `wt-${id}`), startNumber: 1, prepare: [], checks: [],
+      ...(maxConcurrentRuns ? { maxConcurrentRuns } : {}),
+    });
+    const s = setup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_HANG: '1' }, {
+      projects: [proj('p1', 'PUNO', limits[0]), proj('p2', 'PDOS', limits[1])].map((p) => ({ ...p })) as never,
+      ...(global ? { maxConcurrentRuns: global } : { maxConcurrentRuns: undefined }),
+    });
+    const addTo = (id: string, title: string) => {
+      const t = s.store.createTask(getProject(s.config, id), { title, description: '', profileId: 'dev', level: 2 });
+      s.orch.enqueue(t.id);
+      return t.id;
+    };
+    return { ...s, addTo };
+  }
+
+  it('con dos proyectos de límite 1 corren dos tareas a la vez, una de cada', async () => {
+    const { orch, addTo } = dos([1, 1]);
+    const a1 = addTo('p1', 'A1');
+    const a2 = addTo('p1', 'A2');
+    const b1 = addTo('p2', 'B1');
+    expect(orch.queueState().running.sort()).toEqual([a1, b1].sort());
+    expect(orch.queueState().running).not.toContain(a2);
+    await orch.shutdown(100);
+  });
+
+  it('el global, si está, manda', async () => {
+    const { orch, addTo } = dos([1, 1], 1);
+    const a1 = addTo('p1', 'A1');
+    addTo('p2', 'B1');
+    expect(orch.queueState().running).toEqual([a1]);
+    await orch.shutdown(100);
+  });
+
+  it('sin límite propio un proyecto admite 2 a la vez', async () => {
+    const { orch, addTo } = dos([undefined, undefined]);
+    addTo('p1', 'A1');
+    addTo('p1', 'A2');
+    addTo('p1', 'A3');
+    expect(orch.queueState().running).toHaveLength(2);
+    await orch.shutdown(100);
+  });
+
+  it('un proyecto lleno no bloquea al otro aunque su tarea esté antes en la cola', async () => {
+    const { orch, addTo } = dos([1, 1]);
+    const a1 = addTo('p1', 'A1');
+    const a2 = addTo('p1', 'A2');
+    const b1 = addTo('p2', 'B1');
+    expect(a2).not.toBe(b1);
+    expect(orch.queueState().running).toContain(b1);
+    expect(orch.queueState().running).toContain(a1);
+    await orch.shutdown(100);
+  });
+
+  it('una tarea de un proyecto que ya no está en la config se bloquea con el motivo, sin romper el tick', async () => {
+    const { orch, addTo, store, config } = dos([1, 1]);
+    const huerfana = store.createTask(getProject(config, 'p1'), { title: 'Huérfana', description: '', profileId: 'dev', level: 2 });
+    store.setState(huerfana.id, 'queued');
+    config.projects = config.projects.filter((p) => p.id !== 'p1');
+    const b1 = addTo('p2', 'B1');
+    expect(() => orch.tick()).not.toThrow();
+    expect(orch.queueState().running).toEqual([b1]);
+    const t = store.getTask(huerfana.id);
+    expect(t.state).toBe('blocked');
+    expect(t.blockedReason).toBe('El proyecto p1 ya no está en la config de Faro: vuelve a darlo de alta o descarta la tarea.');
+    await orch.shutdown(100);
   });
 });

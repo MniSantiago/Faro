@@ -1,12 +1,12 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { ActionError, BadRequestError, type ReviewActions } from './actions';
 import { registerConfigRoutes } from './api-config';
 import { AssistantError, ForbiddenError } from './errors';
-import { addSecretCommand, type SecretName } from './keychain';
+import { projectSecretCommand, type SecretName } from './keychain';
 import { buildCards } from './metrics/summary';
 import { homeSeries, homeView } from './home';
 import type { AsoCollector } from './aso/collector';
@@ -20,7 +20,8 @@ import type { FunnelConfig } from './metrics/types';
 import type { Push } from './push';
 import { Auth, AuthError, isLocalRequest } from './auth';
 import type { Bus } from './bus';
-import { ConfigError, getProject } from './config';
+import { ConfigError, getProject, isMultiRepo } from './config';
+import { releaseRepo, repoView } from './task-repos';
 import type { Orchestrator } from './orchestrator';
 import { isInside } from './paths';
 import { defaultWindow } from './stats';
@@ -52,7 +53,7 @@ export interface ApiDeps {
   /** Config viva con los overrides del panel (`config` es su `live.config`); sin ella, las rutas `/api/config/*` del panel no existen. */
   live?: LiveConfig;
   /** ¿Existe el secreto? Para el estado conectado / falta del panel (por defecto, el llavero sin leer el valor). */
-  secretExists?: (name: SecretName) => Promise<boolean>;
+  secretExists?: (name: SecretName, projectId: string) => Promise<boolean>;
   /** Versión de la CLI `claude` ya conocida (se pregunta al arrancar, en segundo plano); null si aún no se sabe o falló. */
   claudeVersion?: () => string | null;
   actions: ReviewActions;
@@ -93,6 +94,7 @@ const SeriesQuery = HomeQuery.extend({
   days: z.coerce.number().pipe(z.union([z.literal(7), z.literal(30), z.literal(90)])),
 });
 
+const DeviceProjectBody = z.object({ projectId: z.string().min(1), on: z.boolean() });
 const PushSubBody = z.object({
   endpoint: z.string().max(1000).url().refine((u) => u.startsWith('https://'), 'El endpoint debe ser https'),
   keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(200) }),
@@ -109,6 +111,7 @@ const CreateBody = z.object({
   level: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
   draft: z.boolean().default(false),
   release: z.enum(['none', 'build', 'build_submit']).default('none'),
+  repos: z.array(z.string().min(1)).min(1).optional(),
 });
 const CommentBody = z.object({ comment: z.string().trim().min(1) });
 const ChatBody = z.object({ projectId: z.string().min(1), text: z.string().trim().min(1) });
@@ -245,6 +248,23 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     return { ok: true };
   });
 
+  // Avisos por proyecto: `muted` = el dispositivo no recibe los avisos de ese proyecto.
+  const deviceOr404 = (deviceId: string) => {
+    if (!store.listDevices().some((x) => x.id === deviceId)) throw new NotFoundError(`El dispositivo ${deviceId} no existe`);
+  };
+  app.get('/api/devices/:id/projects', async (req) => {
+    deviceOr404(id(req));
+    const muted = new Set(store.mutedProjects(id(req)));
+    return { projects: config.projects.map((p) => ({ id: p.id, name: p.name, muted: muted.has(p.id) })) };
+  });
+  app.post('/api/devices/:id/projects', async (req) => {
+    deviceOr404(id(req));
+    const b = DeviceProjectBody.parse(req.body);
+    if (!config.projects.some((p) => p.id === b.projectId)) throw new BadRequestError(`Proyecto desconocido: ${b.projectId}`);
+    store.setDeviceProject(id(req), b.projectId, b.on);
+    return { ok: true };
+  });
+
   if (d.push) {
     const push = d.push;
     app.get('/api/push/key', async () => ({ publicKey: push.publicKey() }));
@@ -262,12 +282,20 @@ export function buildApp(d: ApiDeps): FastifyInstance {
     });
   }
 
-  app.get('/api/routines', async () => scheduler.list());
+  /** La página Plan tiene algo que enseñar: backlog, lo pendiente de la tienda (release) o el CI y los PR (github). */
+  const hasPlan = (p: (typeof config.projects)[number]) => Boolean(p.backlogFile || releaseRepo(p) || p.github);
+
+  /** `?project=` opcional: el id validado (desconocido → 400) o undefined. */
+  const queryProject = (req: FastifyRequest): string | undefined => {
+    const { project } = req.query as { project?: string };
+    return project ? getProject(config, project).id : undefined;
+  };
+  app.get('/api/routines', async (req) => scheduler.list(queryProject(req)));
   app.post('/api/routines/:id/run', async (req) => scheduler.runNow(id(req)));
   app.post('/api/routines/:id/toggle', async (req) => scheduler.toggle(id(req)));
 
   app.get('/api/config', async () => ({
-    projects: config.projects.map((p) => ({ id: p.id, name: p.name, prefix: p.prefix, release: Boolean(p.release), metrics: Boolean(p.metrics), aso: Boolean(d.aso && p.aso) })),
+    projects: config.projects.map((p) => ({ id: p.id, name: p.name, prefix: p.prefix, release: Boolean(releaseRepo(p)), metrics: Boolean(p.metrics), aso: Boolean(d.aso && p.aso), plan: hasPlan(p), repos: p.repos!.map((r) => ({ id: r.id, name: r.name ?? r.id })), multiRepo: isMultiRepo(p) })),
     profiles: config.profiles.map((p) => ({ id: p.id, name: p.name, defaultLevel: p.defaultLevel })),
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
     title: config.title ?? 'Faro',
@@ -292,22 +320,37 @@ export function buildApp(d: ApiDeps): FastifyInstance {
   app.get('/api/tasks', async (req) => {
     const { state, parent, limit, offset } = req.query as { state?: string; parent?: string; limit?: string; offset?: string };
     if (parent) return store.listChildren(parent);
+    const projectId = queryProject(req);
     const states = state ? (state.split(',') as TaskState[]) : undefined;
     // Sin `limit`, la lista completa como siempre; con `limit`, página de las más recientes primero.
-    if (limit === undefined) return store.listTasks(states);
+    if (limit === undefined) return store.listTasks(states, projectId ? { projectId } : undefined);
     const page = PageQuery.parse({ limit, offset: offset ?? '0' });
-    return store.listTasks(states, { ...page, newestFirst: true });
+    return store.listTasks(states, { ...page, newestFirst: true, projectId });
   });
 
   // Coste y contexto de las tareas vivas (las del tablero) y gasto equivalente de hoy y de la semana.
-  app.get('/api/stats', async () => {
-    const live = store.listTasks(['draft', 'queued', 'working', 'blocked', 'review', 'pr', 'idle']);
-    return { tasks: store.taskStats(live.map((t) => t.id), (tid) => defaultWindow(config, tid)), spend: store.spend(new Date()) };
+  // Con `?project=`, el gasto es solo el de ese proyecto.
+  app.get('/api/stats', async (req) => {
+    const project = queryProject(req);
+    const live = store.listTasks(['draft', 'queued', 'working', 'blocked', 'review', 'pr', 'idle'], project ? { projectId: project } : undefined);
+    return { tasks: store.taskStats(live.map((t) => t.id), (tid) => defaultWindow(config, tid)), spend: store.spend(new Date(), project) };
   });
 
   app.post('/api/tasks', async (req) => {
     const b = CreateBody.parse(req.body);
-    if (b.release !== 'none' && !getProject(config, b.projectId).release) throw new BadRequestError('Este proyecto no tiene lanzamientos configurados');
+    const project = getProject(config, b.projectId);
+    if (b.repos) {
+      const known = project.repos!.map((r) => r.id);
+      const unknown = b.repos.find((x) => !known.includes(x));
+      if (unknown !== undefined) throw new BadRequestError(`Repo desconocido: ${unknown}`);
+      if (new Set(b.repos).size !== b.repos.length) throw new BadRequestError('Hay repos repetidos');
+      if (known.length === 1 && (b.repos.length !== 1 || b.repos[0] !== known[0])) throw new BadRequestError(`Este proyecto tiene un solo repo (${known[0]})`);
+    }
+    if (b.release !== 'none') {
+      const rr = releaseRepo(project);
+      if (!rr) throw new BadRequestError('Este proyecto no tiene lanzamientos configurados');
+      if (b.repos && !b.repos.includes(rr.id)) throw new BadRequestError('Esta tarea no incluye el repo que se publica');
+    }
     return actions.createTask({ ...b, level: b.level as Level | undefined });
   });
 
@@ -366,12 +409,21 @@ export function buildApp(d: ApiDeps): FastifyInstance {
   });
 
   // Cambios sin subir por proyecto: commits por delante del remoto y tareas con el push pendiente.
-  app.get('/api/push-state', async () => {
-    const projects = await Promise.all(config.projects.map(async (p) => ({
-      id: p.id, name: p.name, remote: p.remote, baseBranch: p.baseBranch,
-      ahead: d.workspaces ? await d.workspaces.ahead(p) : 0,
-      pending: [...new Set(store.listPendingApprovals(p.id, 'push').map((a) => a.taskId))],
-    })));
+  app.get('/api/push-state', async (req) => {
+    const only = queryProject(req);
+    const projects = await Promise.all(config.projects.filter((p) => !only || p.id === only).map(async (p) => {
+      // Por repo: en multi-repo cada uno tiene su rama base y su remoto.
+      const repos = await Promise.all(p.repos!.map(async (r) => ({
+        id: r.id, name: r.name ?? r.id, remote: r.remote, baseBranch: r.baseBranch,
+        ahead: d.workspaces ? await d.workspaces.ahead(repoView(p, r)) : 0,
+      })));
+      return {
+        id: p.id, name: p.name, remote: p.remote, baseBranch: p.baseBranch, multiRepo: isMultiRepo(p),
+        ahead: repos.reduce((n, r) => n + r.ahead, 0),
+        repos: repos.filter((r) => r.ahead > 0),
+        pending: [...new Set(store.listPendingApprovals(p.id, 'push').map((a) => a.taskId))],
+      };
+    }));
     return { projects: projects.filter((p) => p.ahead > 0 || p.pending.length > 0) };
   });
   app.post('/api/projects/:id/push', async (req) => {
@@ -428,7 +480,7 @@ export function buildApp(d: ApiDeps): FastifyInstance {
         status: metrics.status(project),
         cards: buildCards(store, project, new Date(), getProject(config, project).metrics),
         funnel: funnelView(getProject(config, project).metrics?.posthogFunnel),
-        keychain: Object.fromEntries((['revenuecat', 'posthog', 'asc-key-id', 'asc-issuer', 'asc-p8'] as const).map((n) => [n, addSecretCommand(n)])),
+        keychain: Object.fromEntries((['revenuecat', 'posthog', 'asc-key-id', 'asc-issuer', 'asc-p8'] as const).map((n) => [n, projectSecretCommand(n, project, config.projects.length)])),
       };
     });
     app.post('/api/metrics/refresh', async () => {

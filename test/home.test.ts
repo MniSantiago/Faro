@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { headline, homeSeries, homeView, shortReason } from '../src/server/home';
 import type { PlanState } from '../src/server/plan';
 import { Store } from '../src/server/store';
@@ -21,7 +21,8 @@ const METRICS = {
 
 function setup(project: Partial<ProjectConfig> = {}) {
   const base = makeConfig(REPO);
-  const config: FaroConfig = { ...base, projects: [{ ...base.projects[0], ...project }] };
+  const p0 = { ...base.projects[0], ...project };
+  const config: FaroConfig = { ...base, projects: [project.release ? { ...p0, repos: [{ ...p0.repos![0], release: project.release }] } : p0] };
   const store = new Store(path.join(tmpDir('faro-home-'), 'faro.db'));
   return { config, store, project: config.projects[0] };
 }
@@ -97,6 +98,24 @@ describe('homeView', () => {
     expect(spend.spark.at(-2)).toBe(2);
   });
 
+  it('la home de Acme no muestra el gasto de Demo', async () => {
+    const { config: c0, store, project } = setup();
+    const acme: ProjectConfig = { ...project, id: 'acme', name: 'Acme', prefix: 'ACM' };
+    const config: FaroConfig = { ...c0, projects: [project, acme] };
+    addRun(store, project, { at: daysAgo(1), cost: 4 });
+    addRun(store, acme, { at: daysAgo(1), cost: 0.5 });
+    // La llamada al asistente se guarda con la hora del reloj: se fija en NOW para que caiga en la semana.
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+    try { store.recordAssistantCall(2, true, 'demo'); } finally { vi.useRealTimers(); }
+    const v = await homeView({ store, config }, 'acme', NOW);
+    expect(v.tiles[3]).toMatchObject({ metric: 'gasto', value: 0.5 });
+    expect(v.week.find((w) => w.label === 'Ejecuciones de agentes')?.value).toMatch(/^1 · .*0[,.]50/);
+    const s = homeSeries({ store, config }, 'acme', 'gasto', 7, NOW);
+    expect(s.current).toBe(0.5);
+    expect(s.breakdowns[1].rows).toEqual([{ label: 'Dev', value: 0.5 }]);
+    expect((await homeView({ store, config }, 'demo', NOW)).tiles[3].value).toBe(6);
+  });
+
   it('proyecto sin metrics, github ni release: 3 cifras sin configurar, gasto con valor y salud parcial', async () => {
     const { config, store, project } = setup();
     addRun(store, project, { at: daysAgo(1), cost: 0.25 });
@@ -111,6 +130,19 @@ describe('homeView', () => {
     expect(v.headline.text).toBe('Todo en orden');
     expect(JSON.stringify(v)).not.toMatch(/NaN|Infinity/);
     expect(v.week.find((w) => w.label === 'Tareas integradas')?.value).toBe('1');
+  });
+
+  it('release en repos[1]: la línea «Último build» aparece', async () => {
+    const { config, store } = setup();
+    const p = config.projects[0];
+    p.repos = [p.repos![0], { ...p.repos![0], id: 'b', release: { cwd: '.', build: 'b', submit: 's' } }];
+    const plan = { state: async (): Promise<PlanState> => ({
+      backlog: null, backlogError: null, buildFetchedAt: null, buildError: null, unshippedError: null,
+      build: { version: '1.2.0', buildNumber: '34', commit: 'abc', createdAt: daysAgo(2).toISOString() },
+      unshipped: [], github: null,
+    }) };
+    const v = await homeView({ store, config, plan }, 'demo', NOW);
+    expect(v.health.find((h) => h.id === 'build')?.detail).toContain('1.2.0 (34)');
   });
 
   it('con GitHub y release: CI en rojo en el titular y en la salud; PR, build y cambios sin build', async () => {
@@ -278,7 +310,7 @@ describe('homeSeries', () => {
   it('gasto: las llamadas del asistente salen como «Asistente» y no entran en el coste medio por ejecución', () => {
     const { config, store, project } = setup({});
     addRun(store, project, { at: daysAgo(1), cost: 2 });
-    store.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok) VALUES (?, ?, 1)').run(daysAgo(1).toISOString(), 1);
+    store.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok, project_id) VALUES (?, ?, 1, ?)').run(daysAgo(1).toISOString(), 1, 'demo');
     const s = homeSeries({ store, config }, 'demo', 'gasto', 7, NOW);
     expect(s.current).toBe(3);
     expect(s.breakdowns[1].rows).toEqual([{ label: 'Dev', value: 2 }, { label: 'Asistente', value: 1 }]);

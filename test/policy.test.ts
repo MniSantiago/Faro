@@ -91,6 +91,18 @@ describe('agentEnv', () => {
     expect(agentEnv('upstream')['GIT_CONFIG_KEY_0']).toBe('remote.upstream.pushurl');
   });
 
+  it('agentEnv con dos remotos iguales pone una sola pushurl; con dos distintos, dos', () => {
+    expect(agentEnv(['origin', 'origin'])).toEqual(agentEnv('origin'));
+    const e = agentEnv(['origin', 'upstream']);
+    expect(e.GIT_CONFIG_COUNT).toBe('6');
+    expect(e.GIT_CONFIG_KEY_0).toBe('remote.origin.pushurl');
+    expect(e.GIT_CONFIG_KEY_1).toBe('remote.upstream.pushurl');
+    expect(e.GIT_CONFIG_VALUE_1).toBe('faro-sin-push://bloqueado');
+    expect([e.GIT_CONFIG_KEY_2, e.GIT_CONFIG_VALUE_2]).toEqual(['credential.helper', '']);
+    expect([e.GIT_CONFIG_KEY_5, e.GIT_CONFIG_VALUE_5]).toEqual(['url.faro-sin-push://bloqueado/.pushInsteadOf', 'ssh://']);
+    expect(e).not.toHaveProperty('GIT_CONFIG_KEY_6');
+  });
+
   it('las esperas del modo de reintento desatendido son configurables y se puede apagar', () => {
     const e = agentEnv('origin', null, { maxWaitMs: 60_000, maxUsageLimitWaitMs: 0 });
     expect(e).toMatchObject({

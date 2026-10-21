@@ -17,8 +17,10 @@ export const METRIC_IDS = ['revenuecatProjectId', 'posthogHost', 'posthogProject
 export interface ProjectFormState {
   baseBranch: string; ci: Tri; prs: Tri; ciProfile: string; backlogFile: string; contextWindow: string;
   ids: Record<typeof METRIC_IDS[number], string>; funnel: string;
+  /** Agentes a la vez en el proyecto; vacío = el de Faro (2). */
+  maxConcurrent: string;
 }
-type ProjectFields = Pick<ConfigProjectView, 'baseBranch' | 'github' | 'backlogFile' | 'contextWindow' | 'metrics'>;
+type ProjectFields = Pick<ConfigProjectView, 'baseBranch' | 'github' | 'backlogFile' | 'contextWindow' | 'metrics'> & Partial<Pick<ConfigProjectView, 'maxConcurrentRuns'>>;
 
 export function formFromProject(p: ProjectFields): ProjectFormState {
   const m = p.metrics;
@@ -27,6 +29,7 @@ export function formFromProject(p: ProjectFields): ProjectFormState {
     backlogFile: p.backlogFile ?? '', contextWindow: p.contextWindow == null ? '' : String(p.contextWindow),
     ids: Object.fromEntries(METRIC_IDS.map((k) => [k, m?.[k] ?? ''])) as ProjectFormState['ids'],
     funnel: m?.posthogFunnel ? JSON.stringify(m.posthogFunnel, null, 2) : '',
+    maxConcurrent: p.maxConcurrentRuns == null ? '' : String(p.maxConcurrentRuns),
   };
 }
 
@@ -37,6 +40,8 @@ export function projectToBody(f: ProjectFormState): { ok: true; body: Required<P
     contextWindow = intOrNull(f.contextWindow);
     if (contextWindow === null) return { ok: false, error: 'La ventana de contexto debe ser un entero mayor que 0' };
   }
+  const maxConcurrentRuns = f.maxConcurrent.trim() ? intOrNull(f.maxConcurrent) : null;
+  if (f.maxConcurrent.trim() && maxConcurrentRuns === null) return { ok: false, error: 'Los agentes a la vez deben ser un entero mayor que 0' };
   let posthogFunnel: NonNullable<ProjectUpdateBody['metrics']>['posthogFunnel'] = null;
   if (f.funnel.trim()) {
     try { posthogFunnel = JSON.parse(f.funnel); } catch { return { ok: false, error: 'El embudo no es un JSON válido' }; }
@@ -50,7 +55,7 @@ export function projectToBody(f: ProjectFormState): { ok: true; body: Required<P
     body: {
       baseBranch: f.baseBranch.trim(),
       github: Object.values(github).every((v) => v === null) ? null : github,
-      backlogFile: orNull(f.backlogFile), contextWindow,
+      backlogFile: orNull(f.backlogFile), contextWindow, maxConcurrentRuns,
       metrics: noMetrics ? null : { ...ids, posthogFunnel },
     },
   };
@@ -59,6 +64,7 @@ export function projectToBody(f: ProjectFormState): { ok: true; body: Required<P
 export function projectSame(a: ProjectFormState, b: ProjectFormState): boolean {
   return a.baseBranch.trim() === b.baseBranch.trim() && a.ci === b.ci && a.prs === b.prs && a.ciProfile.trim() === b.ciProfile.trim()
     && a.backlogFile.trim() === b.backlogFile.trim() && a.contextWindow.trim() === b.contextWindow.trim()
+    && a.maxConcurrent.trim() === b.maxConcurrent.trim()
     && a.funnel.trim() === b.funnel.trim() && METRIC_IDS.every((k) => a.ids[k].trim() === b.ids[k].trim());
 }
 
@@ -81,15 +87,15 @@ const toMs = (s: string): number | null => {
 export function formFromGeneral(g: GeneralFields): GeneralFormState {
   const w = g.retryWatchdog;
   return {
-    title: g.title, maxConcurrent: String(g.maxConcurrentRuns), coordinatorProfile: g.coordinatorProfile,
+    title: g.title, maxConcurrent: g.maxConcurrentRuns == null ? '' : String(g.maxConcurrentRuns), coordinatorProfile: g.coordinatorProfile,
     enabled: triOf(w?.enabled), maxWait: minutes(w?.maxWaitMs), maxUsageWait: minutes(w?.maxUsageLimitWaitMs),
     waitMs: w?.maxWaitMs, usageWaitMs: w?.maxUsageLimitWaitMs,
   };
 }
 
 export function generalToBody(f: GeneralFormState): { ok: true; body: Required<GeneralUpdateBody> } | { ok: false; error: string } {
-  const maxConcurrentRuns = intOrNull(f.maxConcurrent);
-  if (maxConcurrentRuns === null) return { ok: false, error: 'Las ejecuciones simultáneas deben ser un entero mayor que 0' };
+  const maxConcurrentRuns = f.maxConcurrent.trim() ? intOrNull(f.maxConcurrent) : null;
+  if (f.maxConcurrent.trim() && maxConcurrentRuns === null) return { ok: false, error: 'El límite global de agentes debe ser un entero mayor que 0' };
   let maxWaitMs: number | null = null;
   let maxUsageLimitWaitMs: number | null = null;
   if (f.maxWait.trim() && (maxWaitMs = f.maxWait.trim() === minutes(f.waitMs) ? f.waitMs ?? null : toMs(f.maxWait)) === null) return { ok: false, error: 'La espera máxima debe ser un número de minutos (0 o más)' };

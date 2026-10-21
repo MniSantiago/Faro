@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extractAsoJson, importAsoResult } from './aso/proposals';
-import type { runChecks } from './checks';
-import { getProfile, getProject } from './config';
+import type { runTaskChecks } from './checks';
+import { getProfile, getProject, isMultiRepo } from './config';
 import { integrate, isConflictTask, prMetaKey, type IntegrateDeps, type PrMeta } from './integrate';
 import { artifactKind, isInside } from './paths';
 import { agentEnv, decide } from './policy';
@@ -15,12 +15,17 @@ import type { Runner, RunResult } from './runner/runner';
 import { summarizeQuestions } from './questions';
 import { FARO_DIR, sandboxProfile } from './sandbox';
 import { createSubtasks, notifyParent } from './subtasks';
+import { taskRepos } from './task-repos';
+import {
+  cleanupTask, commitTask, createChatWorkspace, createTaskWorkspace, diffTask, discardTask, refreshChatWorkspace,
+  restoreTaskWorkspace, taskWorkspaceExists, unresolvedTask,
+} from './task-workspace';
 import type { ProjectConfig, Question, QueueState, Task } from './types';
 import { slugify } from './workspaces';
 
 export interface OrchestratorDeps extends IntegrateDeps {
   runner: Pick<Runner, 'run' | 'cancel'>;
-  runChecks: typeof runChecks;
+  runChecks: typeof runTaskChecks;
   setTimer?: (fn: () => void, ms: number) => void;
   /** Token de GitHub de solo lectura para los agentes (llavero `faro`/`github-lectura`); null = sin gh. */
   ghReadToken?: () => Promise<string | null>;
@@ -58,8 +63,16 @@ export class Orchestrator {
   /** Perfil de sandbox para agentes y comprobaciones del proyecto, o null si está desactivado. */
   private sandboxFor(project: ProjectConfig): string | null {
     if (this.d.config.sandbox === false) return null;
+    // Multi-repo: todos los checkouts del proyecto y su carpeta común son de solo lectura (los worktrees, no).
+    const repoPaths = isMultiRepo(project) ? project.repos!.map((r) => r.path) : [project.repoPath];
+    // Los demás proyectos: sus checkouts, de solo lectura; sus worktrees, cerrados.
+    const others = this.d.config.projects.filter((p) => p.id !== project.id).map((p) => ({
+      repoPaths: p.repos?.map((r) => r.path) ?? [p.repoPath], readOnly: p.rootPath ? [p.rootPath] : [], worktreesDir: p.worktreesDir,
+    }));
     return sandboxProfile({
-      faroDir: FARO_DIR, dataDir: this.d.config.dataDir, repoPath: project.repoPath, worktreesDir: project.worktreesDir, home: os.homedir(), ports: [this.d.config.port],
+      faroDir: FARO_DIR, dataDir: this.d.config.dataDir, repoPaths, worktreesDir: project.worktreesDir, home: os.homedir(), ports: [this.d.config.port],
+      ...(project.rootPath ? { readOnly: [project.rootPath] } : {}),
+      ...(others.length ? { others } : {}),
     });
   }
 
@@ -115,18 +128,31 @@ export class Orchestrator {
 
   tick(): void {
     if (this.closing || this.queueState().paused) return;
-    const free = this.d.config.maxConcurrentRuns - this.running.size;
+    // El global, si existe, es un tope duro al total; cada proyecto tiene además el suyo (2 por defecto).
+    const free = (this.d.config.maxConcurrentRuns ?? Infinity) - this.running.size;
     if (free <= 0) return;
+    const perProject = new Map<string, number>();
     // Dos tareas que comparten rama (p. ej. el borrador de conflicto y su padre) nunca corren a la vez en el mismo worktree.
     const busyBranches = new Set<string>();
     for (const id of this.running) {
-      const b = this.d.store.findTask(id)?.branch;
-      if (b) busyBranches.add(b);
+      const r = this.d.store.findTask(id);
+      if (r?.branch) busyBranches.add(r.branch);
+      if (r) perProject.set(r.projectId, (perProject.get(r.projectId) ?? 0) + 1);
     }
     const next: Task[] = [];
     for (const t of this.d.store.listTasks(['queued'])) {
       if (next.length >= free) break;
       if (this.running.has(t.id) || (t.branch && busyBranches.has(t.branch))) continue;
+      // Si su proyecto ya no está en la config, la tarea se bloquea (y avisa) en vez de esperar en la cola para siempre.
+      const project = this.d.config.projects.find((x) => x.id === t.projectId);
+      if (!project) {
+        this.block(t.id, `El proyecto ${t.projectId} ya no está en la config de Faro: vuelve a darlo de alta o descarta la tarea.`);
+        continue;
+      }
+      // Uno lleno no frena a los demás.
+      const n = perProject.get(t.projectId) ?? 0;
+      if (n >= (project.maxConcurrentRuns ?? 2)) continue;
+      perProject.set(t.projectId, n + 1);
       if (t.branch) busyBranches.add(t.branch);
       next.push(t);
     }
@@ -170,29 +196,33 @@ export class Orchestrator {
       let task = store.getTask(taskId);
       const project = getProject(config, task.projectId);
       const profile = getProfile(config, task.profileId);
+      const ws = this.d.workspaces;
       if (task.kind === 'chat') {
-        if (!task.worktreePath || !existsSync(task.worktreePath)) {
-          // Registro viejo de un worktree borrado a mano: se poda para que no bloquee el nombre.
-          if (task.worktreePath) await this.d.workspaces.removeWorktree(project, task.worktreePath);
-          const p = await this.d.workspaces.createDetached(project, `${task.id}-chat`);
+        if (!taskWorkspaceExists(project, task)) {
+          // Registro viejo de un worktree borrado a mano: se poda (y lo que quede) para que no bloquee el nombre.
+          if (task.worktreePath) {
+            if (isMultiRepo(project)) await cleanupTask(ws, project, task);
+            else await ws.removeWorktree(project, task.worktreePath);
+          }
+          const p = await createChatWorkspace(ws, project, task);
           task = store.updateTask(taskId, { worktreePath: p });
         } else {
-          await this.d.workspaces.refreshDetached(project, task.worktreePath);
+          await refreshChatWorkspace(ws, project, task);
         }
       } else if (!task.worktreePath || !task.branch) {
-        const wt = await this.d.workspaces.create(project, task);
+        const wt = await createTaskWorkspace(ws, project, task);
         const now = store.findTask(taskId);
         if (!now || (now.state !== 'queued' && now.state !== 'working')) {
           // Descartada mientras se preparaba el worktree: se archiva lo creado y no se lanza nada.
-          await this.d.workspaces.discard(project, { ...task, worktreePath: wt.path, branch: wt.branch }).catch((e: Error) => {
+          await discardTask(ws, project, { ...task, worktreePath: wt.path, branch: wt.branch }).catch((e: Error) => {
             store.addComment(taskId, 'faro', `No se pudo limpiar el worktree creado: ${e.message}`);
           });
           return;
         }
         task = store.updateTask(taskId, { worktreePath: wt.path, branch: wt.branch });
-      } else if (!existsSync(task.worktreePath)) {
+      } else if (!taskWorkspaceExists(project, task)) {
         // Lo borró la integración de otra tarea que compartía la rama: se rehace sobre la misma rama.
-        await this.d.workspaces.restore(project, task);
+        await restoreTaskWorkspace(ws, project, task);
       }
       const conflictNote = task.kind !== 'chat' && isConflictTask(store, task) ? await this.prepareConflict(project, task) : null;
       // Solo se retoma una sesión que llegó a existir; si no, sesión nueva con el encargo completo.
@@ -216,8 +246,11 @@ export class Orchestrator {
       const routine = task.routineId ? project.routines?.find((r) => r.id === task.routineId) : undefined;
       const running = this.d.runner.run({
         taskId, cwd: task.worktreePath!, sessionId, resume, prompt, displayPrompt: base,
-        systemPrompt: buildSystemPrompt(profile, project, task.level, { chat: task.kind === 'chat', profiles: config.profiles, ghRead: !!ghToken }),
-        level: task.level, profile, env: agentEnv(project.remote, ghToken, config.retryWatchdog), sandboxProfile: sandbox, ghRead: !!ghToken,
+        systemPrompt: buildSystemPrompt(profile, project, task.level, {
+          chat: task.kind === 'chat', profiles: config.profiles, ghRead: !!ghToken,
+          repos: isMultiRepo(project) ? taskRepos(project, task).map((t) => t.repo) : undefined,
+        }),
+        level: task.level, profile, env: agentEnv(isMultiRepo(project) ? project.repos!.map((r) => r.remote) : project.remote, ghToken, config.retryWatchdog), sandboxProfile: sandbox, ghRead: !!ghToken,
         maxBudgetUsd: routine?.maxBudgetUsd,
       });
       // Después de registrar la ejecución: así `recover` sabe qué mensajes iban en ella (delivered_at ≥ inicio).
@@ -237,6 +270,7 @@ export class Orchestrator {
 
   /** Faro hace el merge de la rama base antes de lanzar al agente; devuelve la nota con lo que tiene que resolver. */
   private async prepareConflict(project: ProjectConfig, task: Task): Promise<string> {
+    if (isMultiRepo(project)) return this.prepareConflictMulti(project, task);
     // Con PR, el merge se hace contra lo último de origin.
     if (this.d.github && project.github?.prs) await this.d.workspaces.syncBase(project).catch(() => {});
     const r = await this.d.workspaces.mergeBaseInto(project, task);
@@ -247,6 +281,28 @@ export class Orchestrator {
     return [
       `Faro ha hecho merge de ${project.baseBranch} en esta rama y han quedado conflictos en:`,
       ...r.files.map((f) => `- ${f}`),
+      '',
+      'Edita esos archivos para resolverlos y quita todos los marcadores (<<<<<<<, =======, >>>>>>>). ' +
+        'No ejecutes git merge, git add ni git commit: Faro cierra el merge al terminar.',
+    ].join('\n');
+  }
+
+  /** Como prepareConflict, en cada repo de la tarea (sin PR: multi-repo no los admite). */
+  private async prepareConflictMulti(project: ProjectConfig, task: Task): Promise<string> {
+    const repos = taskRepos(project, task);
+    const files: string[] = [];
+    for (const tr of repos) {
+      const r = await this.d.workspaces.mergeBaseInto(tr.project, tr.task);
+      if (r.status === 'conflict') files.push(...r.files.map((f) => tr.prefix + f));
+    }
+    const bases = repos.map((tr) => `${tr.repo.id}: ${tr.repo.baseBranch}`).join(', ');
+    if (!files.length) {
+      return `Faro ha hecho merge de la rama base de cada repo (${bases}) en esta rama y no ha quedado ningún conflicto. ` +
+        'Comprueba que el resultado tiene sentido y termina; no hace falta tocar nada más.';
+    }
+    return [
+      `Faro ha hecho merge de la rama base de cada repo (${bases}) en esta rama y han quedado conflictos en:`,
+      ...files.map((f) => `- ${f}`),
       '',
       'Edita esos archivos para resolverlos y quita todos los marcadores (<<<<<<<, =======, >>>>>>>). ' +
         'No ejecutes git merge, git add ni git commit: Faro cierra el merge al terminar.',
@@ -350,14 +406,14 @@ export class Orchestrator {
     const { store, config, workspaces } = this.d;
     const wtPath = task.worktreePath!;
     // Con marcadores pendientes no se commitea: se cerraría el merge con el conflicto dentro.
-    const left = await workspaces.unresolvedConflicts(wtPath);
+    const left = await unresolvedTask(workspaces, project, task);
     if (left.length) {
       if (result.summary) store.addComment(task.id, 'agent', result.summary);
       this.block(task.id, `Quedan marcadores de conflicto sin resolver en: ${left.join(', ')}`);
       return;
     }
-    await workspaces.commitAll(wtPath, `${task.id}: ${task.title}`);
-    const diff = await workspaces.diff(project, task);
+    await commitTask(workspaces, project, task, `${task.id}: ${task.title}`);
+    const diff = await diffTask(workspaces, project, task);
 
     const dir = path.join(config.dataDir, 'artifacts', task.id);
     await fs.rm(dir, { recursive: true, force: true });
@@ -373,7 +429,7 @@ export class Orchestrator {
     let checks;
     let interrupted = false;
     try {
-      checks = await this.d.runChecks(project, wtPath, diff.files, { signal: ac.signal, sandboxProfile: this.sandboxFor(project) });
+      checks = await this.d.runChecks(project, task, diff.byRepo, { signal: ac.signal, sandboxProfile: this.sandboxFor(project) });
     } finally {
       this.checkAborts.delete(task.id);
       interrupted = this.requeueAfterChecks.delete(task.id);

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { normalizeConfig } from '../src/server/config';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner } from '../src/server/runner/runner';
@@ -32,7 +32,7 @@ const store = new Store(path.join(data, 'faro.db'));
 const bus = new Bus();
 const workspaces = new GitWorkspaces();
 const runner = new Runner({ store, bus, claudeBin: 'claude' });
-const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks });
+const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks });
 const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
 
 const write = actions.createTask({ projectId: 'smoke', profileId: 'dev', title: 'Crear hola', description: 'Crea el archivo hola.txt con el texto «hola».' });

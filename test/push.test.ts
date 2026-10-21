@@ -93,4 +93,30 @@ describe('Push', () => {
     push.unsubscribe(sub(1).endpoint);
     expect(store.listPushSubscriptions()).toEqual([]);
   });
+
+  it('un dispositivo que silencia Acme no recibe avisos de Acme pero sí de Demo; el local siempre recibe', async () => {
+    const store = new Store(':memory:');
+    const sender = vi.fn<Sender>(async () => ({ statusCode: 201 }));
+    const push = new Push({ store, vapid: { publicKey: 'pub', privateKey: 'priv' }, contact: 'c', sender });
+    const d1 = store.createDevice('iPhone', 'h1');
+    const d2 = store.createDevice('iPad', 'h2');
+    push.subscribe(d1.id, sub(1));
+    push.subscribe(d2.id, sub(2));
+    push.subscribe(null, sub(3));
+    store.setDeviceProject(d1.id, 'acme', false);
+    expect(store.mutedProjects(d1.id)).toEqual(['acme']);
+    const to = async (projectId?: string) => {
+      sender.mockClear();
+      await push.send({ title: 'T', body: 'B', url: '/' }, { projectId });
+      return sender.mock.calls.map(([s]) => s.endpoint.slice(-1)).sort();
+    };
+    expect(await to('acme')).toEqual(['2', '3']);
+    expect(await to('demo')).toEqual(['1', '2', '3']);
+    expect(await to()).toEqual(['1', '2', '3']);
+    store.setDeviceProject(d1.id, 'acme', true);
+    expect(await to('acme')).toEqual(['1', '2', '3']);
+    store.setDeviceProject(d1.id, 'acme', false);
+    store.deleteDevice(d1.id);
+    expect(store.mutedProjects(d1.id)).toEqual([]);
+  });
 });

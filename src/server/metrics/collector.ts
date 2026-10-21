@@ -1,4 +1,4 @@
-import { readSecret, type SecretName } from '../keychain';
+import { readProjectSecret, type SecretName } from '../keychain';
 import type { Store } from '../store';
 import type { FaroConfig } from '../types';
 import type { MetricSource, Snapshot, SourceContext, SourceId } from './types';
@@ -15,7 +15,8 @@ export interface CollectorDeps {
   store: Store;
   config: FaroConfig;
   sources: MetricSource[];
-  secret?: SourceContext['secret'];
+  /** Lee un secreto de un proyecto (por defecto, su clave propia y si no la general). */
+  secret?: (name: SecretName, projectId: string) => Promise<string | null>;
   fetch?: typeof fetch;
   now?: () => Date;
   timeoutMs?: number;
@@ -42,7 +43,7 @@ export class MetricsCollector {
   private async collectOne(projectId: string, config: NonNullable<FaroConfig['projects'][number]['metrics']>, source: MetricSource): Promise<void> {
     const seen: string[] = [];
     const secret = async (n: SecretName) => {
-      const v = await (this.d.secret ?? readSecret)(n);
+      const v = await (this.d.secret ?? readProjectSecret)(n, projectId);
       if (v) seen.push(v);
       return v;
     };

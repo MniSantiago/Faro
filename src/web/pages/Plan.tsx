@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, type ConfigView, type PlanState } from '../api';
+import { api, type PlanState } from '../api';
+import { useCurrentProject } from '../project';
 
 const fecha = (iso: string) => (iso ? new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '');
 
 /** «Plan»: pendientes (el mismo backlog que el plugin de Claude Code), lo hecho sin enviar a la tienda y lo que falta probar. */
 export function Plan() {
-  const [cfg, setCfg] = useState<ConfigView | null>(null);
-  const [projectId, setProjectId] = useState('');
+  const project = useCurrentProject();
+  const projectId = project?.id ?? '';
   const [state, setState] = useState<PlanState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState('');
@@ -16,14 +17,7 @@ export function Plan() {
     api.plan(pid).then((s) => { setState(s); setError(null); }).catch((e: Error) => setError(e.message));
   }, []);
 
-  useEffect(() => {
-    api.config().then((c) => {
-      setCfg(c);
-      const pid = c.projects[0]?.id ?? '';
-      setProjectId(pid);
-      if (pid) load(pid);
-    }).catch((e: Error) => setError(e.message));
-  }, [load]);
+  useEffect(() => { if (projectId) load(projectId); }, [load, projectId]);
 
   const act = (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -43,17 +37,12 @@ export function Plan() {
   const toTest = state.unshipped.filter((u) => u.taskId && u.touchesApp && !u.tested);
   const tested = state.unshipped.filter((u) => u.taskId && u.touchesApp && u.tested);
   const b = state.build;
-  const release = cfg?.projects.find((p) => p.id === projectId)?.release ?? false;
+  const release = project?.release ?? false;
 
   return (
     <div className="plan">
       <div className="page-head">
         <h1>Plan</h1>
-        {cfg && cfg.projects.length > 1 && (
-          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); load(e.target.value); }}>
-            {cfg.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        )}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
 

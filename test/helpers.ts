@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { normalizeConfig } from '../src/server/config';
-import type { FaroConfig, Task } from '../src/server/types';
+import type { FaroConfig, ProjectConfig, Task } from '../src/server/types';
 
 export function tmpDir(prefix = 'faro-'): string {
   return mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -47,10 +47,27 @@ export function makeConfig(repo: string, over: Partial<FaroConfig> = {}): FaroCo
   });
 }
 
+/** Config con un proyecto de dos repos reales (`a` y `b`). */
+export function makeMultiConfig(over: Partial<FaroConfig> = {}): FaroConfig {
+  const data = tmpDir('faro-data-');
+  return normalizeConfig({
+    host: '127.0.0.1', port: 0, dataDir: data, claudeBin: FAKE_CLAUDE, maxConcurrentRuns: 2, sandbox: false,
+    projects: [{
+      id: 'multi', name: 'Multi', prefix: 'MUL', worktreesDir: path.join(data, 'wt'), startNumber: 1,
+      repos: [
+        { id: 'a', path: makeRepo(), baseBranch: 'main', remote: 'origin', checks: [{ name: 'ca', command: 'true' }] },
+        { id: 'b', path: makeRepo(), baseBranch: 'main', remote: 'origin', checks: [{ name: 'cb', command: 'true' }] },
+      ],
+    }],
+    profiles: [{ id: 'dev', name: 'Dev', instructions: 'Eres un agente de prueba.', defaultLevel: 2, timeoutMinutes: 1 }],
+    ...over,
+  });
+}
+
 export function makeTask(over: Partial<Task> = {}): Task {
   return {
     id: 'DEM-1', projectId: 'demo', title: 'Tarea', description: '', profileId: 'dev', state: 'queued', level: 2,
-    parentId: null, routineId: null, branch: null, worktreePath: null, sessionId: null, sessionStarted: false, kind: 'task', questions: null, release: 'none', nextPrompt: null,
+    parentId: null, routineId: null, branch: null, worktreePath: null, sessionId: null, sessionStarted: false, kind: 'task', questions: null, release: 'none', repos: null, nextPrompt: null,
     blockedReason: null, summary: null, attempts: 0, createdAt: '', updatedAt: '', ...over,
   };
 }
@@ -62,4 +79,10 @@ export async function until(fn: () => boolean, ms = 5000): Promise<void> {
     if (Date.now() > end) throw new Error('until: tiempo agotado');
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/** Un proyecto normalizado sin `repos`, para editar sus campos sueltos y volver a normalizar. */
+export function withoutRepos(p: ProjectConfig): ProjectConfig {
+  const { repos: _repos, ...rest } = p;
+  return rest;
 }

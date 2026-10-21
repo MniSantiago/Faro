@@ -1,4 +1,4 @@
-import type { Comment, Level, ProfileConfig, ProjectConfig, Task } from '../types';
+import type { Comment, Level, ProfileConfig, ProjectConfig, RepoConfig, Task } from '../types';
 
 export const RESULT_FENCE = 'faro-result';
 
@@ -6,16 +6,22 @@ export function buildSystemPrompt(
   profile: ProfileConfig,
   project: ProjectConfig,
   level: Level,
-  opts: { chat?: boolean; profiles?: ProfileConfig[]; ghRead?: boolean } = {},
+  opts: { chat?: boolean; profiles?: ProfileConfig[]; ghRead?: boolean; repos?: RepoConfig[] } = {},
 ): string {
+  // Lo del proyecto (para todos los perfiles y para este) va justo tras las instrucciones genéricas del perfil.
+  const about = [project.instructions, project.profileNotes?.[profile.id]].filter(Boolean) as string[];
   const lines = [
     `Eres el agente «${profile.name}» de Faro y trabajas en el proyecto ${project.name}.`,
     profile.instructions,
+    ...(about.length ? [`Sobre ${project.name}:`, ...about] : []),
     '',
     'Reglas de Faro:',
     opts.chat
       ? '- Trabajas en una copia de solo lectura de la rama base; no cambies de rama ni hagas merge, push, builds de EAS ni publiques nada: de eso se encarga Faro.'
       : '- Trabajas en un git worktree aislado, en tu propia rama. No cambies de rama ni hagas merge, push, builds de EAS ni publiques nada: de eso se encarga Faro.',
+    ...(opts.repos?.length
+      ? [`- Tu carpeta tiene un repo por subcarpeta: ${opts.repos.map((r) => `${r.id}/ (${r.name ?? r.id})`).join(', ')}. Cada una es un git worktree en tu rama.`]
+      : []),
     level === 1
       ? '- Esta tarea es de solo lectura: no modifiques archivos. Tu entrega es el resumen.'
       : '- No hace falta que hagas commit: Faro commitea los cambios del worktree al terminar.',
@@ -33,14 +39,19 @@ export function buildSystemPrompt(
   ];
   if (opts.chat) {
     const others = (opts.profiles ?? []).filter((p) => p.id !== profile.id);
+    // Tras las instrucciones del perfil y del proyecto, antes de «Reglas de Faro».
     lines.splice(
-      2,
+      lines.indexOf(''),
       0,
       '',
       'Estás en una conversación con el usuario desde el panel de Faro. Cada mensaje suyo es un turno nuevo de esta misma sesión.',
       'Tu respuesta al usuario va en "summary" (puede tener varios párrafos, en Markdown).',
       'Ves el código actual de la rama base en solo lectura. No haces el trabajo: lo propones como "subtasks" para estos perfiles:',
-      ...others.map((p) => `- ${p.id} (${p.name}): ${p.instructions.split('. ')[0].replace(/\.$/, '')}.`),
+      // Primera frase del perfil (genérica) y su nota en este proyecto, si la hay.
+      ...others.map((p) => {
+        const note = project.profileNotes?.[p.id];
+        return `- ${p.id} (${p.name}): ${p.instructions.split('. ')[0].replace(/\.$/, '')}.${note ? ` ${note}` : ''}`;
+      }),
     );
   }
   return lines.join('\n');

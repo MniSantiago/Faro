@@ -96,7 +96,7 @@ export class Scheduler {
     }
     return this.d.actions.createTask({
       projectId: project.id, title: expandTemplate(r.title, at), description,
-      profileId: r.profileId, level: r.level, draft: r.draft ?? false, routineId: r.id, release: r.release ?? 'none',
+      profileId: r.profileId, level: r.level, draft: r.draft ?? false, routineId: r.id, release: r.release ?? 'none', repos: r.repos,
     });
   }
 
@@ -153,8 +153,8 @@ export class Scheduler {
     return this.d.store.updateRoutine(id, { enabled, nextRunAt });
   }
 
-  list(): RoutineView[] {
-    return this.all().flatMap(({ r }) => {
+  list(projectId?: string): RoutineView[] {
+    return this.all().filter(({ project }) => !projectId || project.id === projectId).flatMap(({ r }) => {
       const row = this.d.store.getRoutine(r.id);
       if (!row) return [];
       return [{ ...row, name: r.name, profileId: r.profileId, level: r.level, draft: r.draft ?? false, recent: this.d.store.listTasksByRoutine(r.id, 5) }];

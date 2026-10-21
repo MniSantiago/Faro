@@ -1,5 +1,6 @@
 import type { Bus } from './bus';
 import { getProject } from './config';
+import { taskRepoIds } from './task-repos';
 import type { FaroResult } from './runner/result';
 import type { Store } from './store';
 import type { FaroConfig, Level, Task } from './types';
@@ -17,6 +18,7 @@ export function createSubtasks(d: { store: Store; config: FaroConfig; bus: Bus }
     return [];
   }
   const project = getProject(config, parent.projectId);
+  const parentRepos = taskRepoIds(project, parent);
   const created: Task[] = [];
   const problems: string[] = [];
   for (const [i, s] of proposed.entries()) {
@@ -33,9 +35,17 @@ export function createSubtasks(d: { store: Store; config: FaroConfig; bus: Bus }
       problems.push(`«${title}»: el perfil «${s.profileId}» no existe.`);
       continue;
     }
+    // Hereda los repos del padre; si propone un subconjunto, solo valen ids que el padre tiene.
+    let repos = parent.repos ?? undefined;
+    if (s.repos?.length) {
+      const valid = [...new Set(s.repos.filter((id) => parentRepos.includes(id)))];
+      const dropped = s.repos.filter((id) => !parentRepos.includes(id));
+      if (dropped.length) problems.push(`«${title}»: repos descartados porque ${parent.id} no los tiene: ${dropped.join(', ')}.`);
+      if (valid.length) repos = valid;
+    }
     const t = store.createTask(project, {
       title, description: s.description, profileId: s.profileId,
-      level: Math.min(s.level, MAX_SUBTASK_LEVEL) as Level, parentId: parent.id,
+      level: Math.min(s.level, MAX_SUBTASK_LEVEL) as Level, parentId: parent.id, repos,
     });
     bus.emitTask(t);
     created.push(t);

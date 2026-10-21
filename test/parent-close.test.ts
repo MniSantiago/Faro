@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner } from '../src/server/runner/runner';
 import { Store } from '../src/server/store';
@@ -21,7 +21,7 @@ function setup() {
   const workspaces = new GitWorkspaces();
   const env: Record<string, string> = { FAKE_FIXTURES: fixture('stream-done.jsonl') };
   const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
-  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
   const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
   return { repo, config, store, orch, actions };
 }

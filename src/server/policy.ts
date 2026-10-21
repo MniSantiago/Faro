@@ -51,22 +51,21 @@ export const ALWAYS_DENIED = [
 /** Esperas por defecto del modo de reintento desatendido: por debajo del tiempo máximo de cualquier perfil. */
 export const RETRY_WATCHDOG_DEFAULT_MS = 5 * 60_000;
 
-export function agentEnv(remote: string, ghReadToken: string | null = null, watchdog: RetryWatchdogConfig = {}): Record<string, string> {
-  return {
-    GIT_CONFIG_COUNT: '5',
-    GIT_CONFIG_KEY_0: `remote.${remote}.pushurl`,
-    GIT_CONFIG_VALUE_0: 'faro-sin-push://bloqueado',
+export function agentEnv(remotes: string | string[], ghReadToken: string | null = null, watchdog: RetryWatchdogConfig = {}): Record<string, string> {
+  const git: [string, string][] = [
+    // Un pushurl por remoto distinto (varios repos pueden tener remotos con otro nombre).
+    ...[...new Set(typeof remotes === 'string' ? [remotes] : remotes)].map((r): [string, string] => [`remote.${r}.pushurl`, 'faro-sin-push://bloqueado']),
     // Un helper vacío vacía la lista: git no puede sacar credenciales del llavero ni de ningún helper.
-    GIT_CONFIG_KEY_1: 'credential.helper',
-    GIT_CONFIG_VALUE_1: '',
+    ['credential.helper', ''],
     // Un push a una URL https explícita (sin pasar por el remoto) también va a un destino inexistente.
-    GIT_CONFIG_KEY_2: 'url.faro-sin-push://bloqueado/.pushInsteadOf',
-    GIT_CONFIG_VALUE_2: 'https://',
+    ['url.faro-sin-push://bloqueado/.pushInsteadOf', 'https://'],
     // Las URL ssh (scp «git@…» y «ssh://») también se reescriben a un destino inexistente.
-    GIT_CONFIG_KEY_3: 'url.faro-sin-push://bloqueado/.pushInsteadOf',
-    GIT_CONFIG_VALUE_3: 'git@',
-    GIT_CONFIG_KEY_4: 'url.faro-sin-push://bloqueado/.pushInsteadOf',
-    GIT_CONFIG_VALUE_4: 'ssh://',
+    ['url.faro-sin-push://bloqueado/.pushInsteadOf', 'git@'],
+    ['url.faro-sin-push://bloqueado/.pushInsteadOf', 'ssh://'],
+  ];
+  return {
+    GIT_CONFIG_COUNT: String(git.length),
+    ...Object.fromEntries(git.flatMap(([k, v], i) => [[`GIT_CONFIG_KEY_${i}`, k], [`GIT_CONFIG_VALUE_${i}`, v]])),
     // Y aunque algo se colara, no hay cliente SSH.
     GIT_SSH_COMMAND: 'false',
     GIT_TERMINAL_PROMPT: '0',

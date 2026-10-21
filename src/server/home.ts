@@ -6,6 +6,7 @@ import { buildCards } from './metrics/summary';
 import type { SourceId } from './metrics/types';
 import type { Plan, PlanState } from './plan';
 import type { Store } from './store';
+import { releaseRepo } from './task-repos';
 import type { FaroConfig, ProjectConfig, RunOutcome } from './types';
 
 export type HomeMetric = 'descargas' | 'conversion' | 'mrr' | 'gasto';
@@ -112,7 +113,7 @@ function dailyValues(store: Store, p: ProjectConfig, metric: HomeMetric, days: s
   const from = dayStart(now, days.length - 1).toISOString();
   const byDay = new Map<string, number | null>();
   if (metric === 'gasto') {
-    for (const r of store.spendByDay(from)) byDay.set(r.day, r.usd);
+    for (const r of store.spendByDay(from, p.id)) byDay.set(r.day, r.usd);
     return days.map((d) => byDay.get(d) ?? 0);
   }
   if (metric === 'descargas') {
@@ -202,7 +203,7 @@ function healthLines(d: HomeDeps, p: ProjectConfig, st: PlanState | null, now: D
       }
       : { id: 'ci', label: `CI de ${p.baseBranch}`, detail: st.github.error ? 'GitHub no responde' : 'Sin ejecuciones', tone: 'warn' });
   }
-  if (p.release && st) {
+  if (releaseRepo(p) && st) {
     const b = st.build;
     if (b) {
       const where = buildWhere(store, p, b.version);
@@ -260,9 +261,9 @@ function weekLines(d: HomeDeps, p: ProjectConfig, now: Date, from7: string): Hom
     const ok = runs.filter((r) => r.outcome === 'done').length;
     week.push({ label: 'Rutinas', value: `${ok} ok · ${runs.length - ok} ${runs.length - ok === 1 ? 'fallida' : 'fallidas'}` });
   }
-  week.push({ label: 'Ejecuciones de agentes', value: `${formatValue(store.runCount(from7), 'int')} · ${money(store.spend(now).week)}` });
+  week.push({ label: 'Ejecuciones de agentes', value: `${formatValue(store.runCount(from7, p.id), 'int')} · ${money(store.spend(now, p.id).week)}` });
   const ids = new Set((p.routines ?? []).map((r) => r.id));
-  const top = store.spendBy('routine', from7).find((r) => ids.has(r.key));
+  const top = store.spendBy('routine', from7, p.id).find((r) => ids.has(r.key));
   if (top) week.push({ label: 'Rutina más cara', value: `${routineName(d.config, top.key)} · ${money(top.usd)}` });
   if (p.aso) week.push({ label: 'Propuestas ASO sin decidir', value: formatValue(store.aso.listProposals(p.id, 'pending').length, 'int') });
   return week;
@@ -329,7 +330,7 @@ export function homeSeries(d: HomeDeps, projectId: string, metric: HomeMetric, d
   let note: string | null = null;
 
   if (metric === 'gasto') {
-    const byProfile = d.store.spendBy('profile', from);
+    const byProfile = d.store.spendBy('profile', from, p.id);
     // Las llamadas del asistente salen en «Por perfil» bajo «Asistente», pero no son ejecuciones de agentes:
     // no entran en el coste medio por ejecución (ni su importe ni su número).
     const agentRuns = byProfile.filter((r) => r.key !== 'Asistente');
@@ -337,7 +338,7 @@ export function homeSeries(d: HomeDeps, projectId: string, metric: HomeMetric, d
     current = sum(values as number[]);
     const profileName = (id: string) => d.config.profiles.find((x) => x.id === id)?.name ?? id;
     breakdowns = [
-      { title: 'Por rutina', rows: d.store.spendBy('routine', from).slice(0, TOP).map((r) => ({ label: routineName(d.config, r.key), value: r.usd })) },
+      { title: 'Por rutina', rows: d.store.spendBy('routine', from, p.id).slice(0, TOP).map((r) => ({ label: routineName(d.config, r.key), value: r.usd })) },
       { title: 'Por perfil', rows: byProfile.map((r) => ({ label: profileName(r.key), value: r.usd })) },
       { title: 'Resumen', rows: runs > 0 ? [{ label: 'Coste medio por ejecución', value: sum(agentRuns.map((r) => r.usd)) / runs }] : [] },
     ];

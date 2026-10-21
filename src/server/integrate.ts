@@ -1,10 +1,12 @@
 import type { Bus } from './bus';
-import { getProject } from './config';
+import { getProject, isMultiRepo } from './config';
 import { gitOk } from './exec';
-import { isIntegrating, withIntegrationLock } from './locks';
+import { integrateMulti, integrationScope, pushFailureMessage, pushTaskProject } from './integrate-multi';
+import { isIntegrating, withIntegrationLock, withProjectIntegrationLock } from './locks';
 import { decide } from './policy';
 import type { Releases } from './releases';
 import type { Store } from './store';
+import { cleanupTask, diffTask } from './task-workspace';
 import type { FaroConfig, Level, Task, TaskState } from './types';
 import type { GitHub } from './github';
 import type { Workspaces } from './workspaces';
@@ -23,7 +25,7 @@ export interface IntegrateDeps {
 
 /** Veces que una tarea de conflicto se reencola sola porque la rama base volvió a cambiar. */
 export const MAX_CONFLICT_RETRIES = 3;
-const RETRY_MARK = 'La rama base ha vuelto a cambiar';
+export const RETRY_MARK = 'La rama base ha vuelto a cambiar';
 const OPEN_STATES: TaskState[] = ['draft', 'queued', 'working', 'blocked', 'review', 'pr', 'idle'];
 
 export type IntegrateResult =
@@ -52,8 +54,19 @@ function conflictDescription(parentId: string, branch: string, base: string, out
   ].join('\n');
 }
 
+/** Tarea abierta que ya está resolviendo el conflicto de `task` (misma rama), si la hay. */
+export function resolvingConflictTask(store: Pick<Store, 'listTasks' | 'findTask'>, task: Task): Task | undefined {
+  return store.listTasks(OPEN_STATES)
+    .find((o) => o.parentId === task.id && o.branch === task.branch && isConflictTask(store, o));
+}
+
+/**
+ * Integra la tarea con su lock (rechaza si ya se integra) y el del proyecto (espera a las demás integraciones y
+ * push del proyecto). Lo que corre dentro no vuelve a pedir el del proyecto: no es reentrante.
+ */
 export function integrate(d: IntegrateDeps, taskId: string, opts: { userApproved: boolean }): Promise<IntegrateResult> {
-  return withIntegrationLock(taskId, () => integrateLocked(d, taskId, opts));
+  return withIntegrationLock(taskId, () =>
+    withProjectIntegrationLock(d.store.getTask(taskId).projectId, () => integrateLocked(d, taskId, opts)));
 }
 
 async function integrateLocked(d: IntegrateDeps, taskId: string, opts: { userApproved: boolean }): Promise<IntegrateResult> {
@@ -61,11 +74,12 @@ async function integrateLocked(d: IntegrateDeps, taskId: string, opts: { userApp
   const task = store.getTask(taskId);
   if (task.state !== 'review') throw new Error(`${taskId} no está en revisión`);
   const project = getProject(d.config, task.projectId);
+  if (isMultiRepo(project)) return integrateMulti(d, task, opts);
 
   const diff = await workspaces.diff(project, task);
   if (diff.files.length === 0) {
     try {
-      await workspaces.cleanup(project, task);
+      await cleanupTask(workspaces, project, task);
     } catch (e) {
       store.addComment(taskId, 'faro', `Sin cambios que integrar, pero no se pudo borrar el worktree: ${(e as Error).message}`);
     }
@@ -75,8 +89,7 @@ async function integrateLocked(d: IntegrateDeps, taskId: string, opts: { userApp
   }
 
   // Ya hay una tarea resolviendo el conflicto de esta: integrar otra vez solo crearía un duplicado.
-  const resolving = store.listTasks(OPEN_STATES)
-    .find((o) => o.parentId === taskId && o.branch === task.branch && isConflictTask(store, o));
+  const resolving = resolvingConflictTask(store, task);
   if (resolving) {
     const message = `${resolving.id} ya está resolviendo el conflicto de esta tarea; cuando se integre, esta quedará hecha.`;
     return { status: 'failed', message };
@@ -183,7 +196,7 @@ async function openPr(d: IntegrateDeps, task: Task, opts: { userApproved: boolea
  * cierre de padres. Devuelve si se hizo push a la rama base.
  */
 export async function finishIntegrated(
-  d: IntegrateDeps, task: Task, o: { userApproved: boolean; commit: string; viaGithub: boolean },
+  d: IntegrateDeps, task: Task, o: { userApproved: boolean; commit: string; viaGithub: boolean; releaseCommit?: string | null },
 ): Promise<boolean> {
   const { store, bus, workspaces } = d;
   const taskId = task.id;
@@ -195,6 +208,16 @@ export async function finishIntegrated(
     // El PR lo fusionó GitHub: la rama base del remoto ya lo tiene.
     store.addApproval(taskId, 'push', 'auto');
     pushed = true;
+  } else if (decide(task.level, 'push') === 'auto' && isMultiRepo(project)) {
+    // Ya dentro del lock del proyecto (integrate): se sube directamente, sin volver a pedirlo.
+    const r = await pushTaskProject(workspaces, project);
+    if (r.failed.length) {
+      store.addComment(taskId, 'faro', `Integrada, pero el push no se completó. ${pushFailureMessage(r)}`);
+      store.addApproval(taskId, 'push', 'pending');
+    } else {
+      store.addApproval(taskId, 'push', 'auto');
+      pushed = true;
+    }
   } else if (decide(task.level, 'push') === 'auto') {
     try {
       await workspaces.push(project);
@@ -226,13 +249,22 @@ export async function finishIntegrated(
   const sharers = store.listTasks(OPEN_STATES).filter((o) => o.id !== taskId && o.branch === task.branch);
   if (!sharers.length) {
     try {
-      await workspaces.cleanup(project, task);
+      // Una tarea de conflicto multi-repo se lleva también los worktrees de los repos del padre.
+      await cleanupTask(workspaces, project, integrationScope(store, project, task));
     } catch (e) {
       store.addComment(taskId, 'faro', `Integrada, pero no se pudo borrar el worktree: ${(e as Error).message}`);
     }
   }
   try {
-    d.releases?.afterIntegrate(taskId, commit);
+    // releaseCommit: sha integrado del repo que se publica; null = la tarea no lo incluye (Faro no lanza el build).
+    if (o.releaseCommit === null) {
+      if (task.release !== 'none') {
+        store.addComment(taskId, 'faro', 'Pediste un lanzamiento, pero esta tarea no incluye el repo que se publica: no se lanza ningún build.');
+        bus.emitTask(store.getTask(taskId));
+      }
+    } else {
+      d.releases?.afterIntegrate(taskId, o.releaseCommit ?? commit);
+    }
   } catch (e) {
     store.addComment(taskId, 'faro', `Integrada, pero no se pudo preparar el lanzamiento: ${(e as Error).message}`);
     bus.emitTask(store.getTask(taskId));
@@ -257,7 +289,7 @@ export async function closeFinishedParent(d: IntegrateDeps, child: Task): Promis
   const kids = store.listTasks().filter((o) => o.parentId === parent.id);
   if (!kids.every((k) => FINISHED.includes(k.state)) || !kids.some((k) => k.state === 'done')) return;
   const project = getProject(d.config, parent.projectId);
-  const files = parent.branch ? (await workspaces.diff(project, parent)).files : [];
+  const files = parent.branch ? (await diffTask(workspaces, project, parent)).files : [];
   if (files.length > 0) {
     if (!store.listComments(parent.id).some((c) => c.author === 'faro' && c.body === OWN_CHANGES_NOTE)) {
       store.addComment(parent.id, 'faro', OWN_CHANGES_NOTE);
@@ -268,7 +300,7 @@ export async function closeFinishedParent(d: IntegrateDeps, child: Task): Promis
   const sharers = store.listTasks(OPEN_STATES).filter((o) => o.id !== parent.id && parent.branch && o.branch === parent.branch);
   if (!sharers.length) {
     try {
-      await workspaces.cleanup(project, parent);
+      await cleanupTask(workspaces, project, parent);
     } catch (e) {
       store.addComment(parent.id, 'faro', `No se pudo borrar el worktree: ${(e as Error).message}`);
     }

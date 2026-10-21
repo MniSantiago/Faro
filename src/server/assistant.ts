@@ -124,22 +124,22 @@ export async function draftRoutine(
       cwd: dir, env: { ...process.env, ...agentEnv(project.remote), ...d.env }, timeoutMs: d.timeoutMs ?? TIMEOUT_MS,
     });
     if (out.timedOut) {
-      d.store.recordAssistantCall(0, false); // cuenta como intento aunque no se sepa el coste
+      d.store.recordAssistantCall(0, false, projectId); // cuenta como intento aunque no se sepa el coste
       throw new AssistantError('El asistente tardó demasiado');
     }
     let res: CliResult;
     try { res = JSON.parse(out.stdout) as CliResult; } catch {
-      d.store.recordAssistantCall(0, false);
+      d.store.recordAssistantCall(0, false, projectId);
       throw new AssistantError(`El asistente falló${out.stderr.trim() ? `: ${out.stderr.trim().split('\n').pop()!.slice(0, 200)}` : ''}`);
     }
     const cost = typeof res.total_cost_usd === 'number' ? res.total_cost_usd : 0;
     const raw = res.structured_output as Partial<RoutineDraft> | undefined;
     if (res.is_error === true || !raw || typeof raw !== 'object') {
-      d.store.recordAssistantCall(cost, false);
+      d.store.recordAssistantCall(cost, false, projectId);
       const why = res.subtype === 'error_max_budget_usd' ? 'superó su tope de gasto' : String(res.result || res.subtype || 'no devolvió una rutina').slice(0, 200);
       throw new AssistantError(`El asistente falló: ${why}`);
     }
-    d.store.recordAssistantCall(cost, true);
+    d.store.recordAssistantCall(cost, true, projectId);
     return validate(d.config, project, raw);
   } finally {
     inFlight.delete(d.store);

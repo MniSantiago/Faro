@@ -6,6 +6,7 @@ import { ProfileForm } from '../components/config/ProfileForm';
 import { ProjectForm } from '../components/config/ProjectForm';
 import { RoutineForm, type SavedNotice } from '../components/config/RoutineForm';
 import { describeCron } from '../cron';
+import { useProject } from '../project';
 
 const TABS = [['rutinas', 'Rutinas'], ['perfiles', 'Perfiles'], ['proyecto', 'Proyecto'], ['generales', 'Generales']] as const;
 type Tab = typeof TABS[number][0];
@@ -33,7 +34,9 @@ export function Config({ route }: { route: string }) {
   const onDirty = useCallback((d: boolean) => { dirty.current = d; }, []);
 
   // «Activada» es el interruptor de la página Rutinas (estado del programador, no de la config).
-  const loadRows = useCallback(() => api.routines().then(setRows).catch(() => {}), []);
+  // Solo las del proyecto actual, como en la página Rutinas.
+  const { projectId } = useProject();
+  const loadRows = useCallback(() => api.routines(projectId ?? undefined).then(setRows).catch(() => {}), [projectId]);
   /** Recarga la config y los interruptores; nunca falla (el error queda en pantalla). */
   const load = useCallback(async () => {
     await Promise.all([
@@ -75,7 +78,7 @@ export function Config({ route }: { route: string }) {
       {!full ? (!error && <p className="muted">Cargando…</p>)
         : tab === 'rutinas' ? <RoutinesTab full={full} rows={rows} id={id} local={local} go={go} onDirty={onDirty} reload={load} />
         : tab === 'perfiles' ? <ProfilesTab full={full} id={id} local={local} go={go} onDirty={onDirty} reload={load} />
-        : tab === 'proyecto' ? <ProjectTab full={full} id={id} go={go} onDirty={onDirty} reload={load} />
+        : tab === 'proyecto' ? <ProjectTab full={full} id={id} onDirty={onDirty} reload={load} />
         : <GeneralTab full={full} onDirty={onDirty} reload={load} />}
     </div>
   );
@@ -99,11 +102,13 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
   const [notice, setNotice] = useState<SavedNotice & { routineId: string } | null>(null);
   const enabledOf = (rid: string) => rows.find((r) => r.id === rid)?.enabled ?? false;
   const profileName = (pid: string) => full.profiles.find((p) => p.id === pid)?.name ?? pid;
-  const projectName = (pid: string) => full.projects.find((p) => p.id === pid)?.name ?? pid;
-  const many = full.projects.length > 1;
+  // Solo las del proyecto actual (también los interruptores, `rows`).
+  const { projectId } = useProject();
+  const routines = full.routines.filter((r) => !projectId || r.projectId === projectId);
   const creating = id === NEW_ID;
   // Sin id en la ruta, la primera rutina.
-  const selected: ConfigRoutineView | null = creating ? null : full.routines.find((r) => r.id === id) ?? (id ? null : full.routines[0] ?? null);
+  const selected: ConfigRoutineView | null = creating ? null : routines.find((r) => r.id === id) ?? (id ? null : routines[0] ?? null);
+  const elsewhere = id && !selected && !creating ? full.routines.find((r) => r.id === id) : undefined;
   const ignored = full.ignored.filter((i) => i.kind === 'routine');
 
   // Se espera a tener la config nueva antes de cambiar de formulario: así no asoman los valores viejos
@@ -126,7 +131,7 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
       <div className={`config-grid${id ? ' has-sel' : ''}`}>
         <Back label="Rutinas" onClick={() => go('#/config/rutinas')} />
         <div className="clist">
-          {full.routines.map((r) => {
+          {routines.map((r) => {
             const on = enabledOf(r.id);
             const current = selected?.id === r.id;
             return (
@@ -136,14 +141,13 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
                   {r.name}
                   <small>
                     {describeCron(r.cron ?? null)}{!on && ' · desactivada'} · {profileName(r.profileId)} · N{r.level}
-                    {many && ` · ${projectName(r.projectId)}`}
                   </small>
                 </span>
                 <span className={`tag${r.origin === 'config' ? '' : ' p'}${on ? '' : ' off'}`}>{r.origin}</span>
               </button>
             );
           })}
-          {full.routines.length === 0 && <p className="muted cli-empty">No hay rutinas todavía.</p>}
+          {routines.length === 0 && <p className="muted cli-empty">No hay rutinas todavía.</p>}
           <button type="button" className={`cli new${creating ? ' on' : ''}`} onClick={() => go(`#/config/rutinas/${NEW_ID}`)}>+ Nueva rutina</button>
         </div>
         <div className="cdetail">
@@ -153,6 +157,8 @@ function RoutinesTab({ full, rows, id, local, go, onDirty, reload }: TabProps) {
           {creating || selected ? (
             <RoutineForm key={`${selected?.id ?? NEW_ID}:${version}`} full={full} routine={selected}
               enabled={selected ? enabledOf(selected.id) : false} local={local} onDirty={onDirty} onSaved={onSaved} />
+          ) : elsewhere ? (
+            <p className="muted">La rutina <code>{id}</code> es de {full.projects.find((p) => p.id === elsewhere.projectId)?.name ?? elsewhere.projectId}: cambia a ese proyecto para verla.</p>
           ) : id ? (
             <p className="muted">La rutina <code>{id}</code> no existe.</p>
           ) : null}
@@ -213,32 +219,22 @@ function ProfilesTab({ full, id, local, go, onDirty, reload }: Omit<TabProps, 'r
   );
 }
 
-function ProjectTab({ full, id, go, onDirty, reload }: SimpleTabProps) {
+/** El proyecto actual (el del selector global); `#/config/proyecto/<id>` lo cambia a ese. */
+function ProjectTab({ full, id, onDirty, reload }: Omit<SimpleTabProps, 'go'>) {
   const [version, setVersion] = useState(0);
-  const selected: ConfigProjectView | null = full.projects.find((p) => p.id === id) ?? (id ? null : full.projects[0] ?? null);
+  const { projectId, setProject } = useProject();
+  const known = id !== null && full.projects.some((p) => p.id === id);
+  // El id de la ruta pasa a ser el proyecto actual y se quita de la ruta: así el selector no choca con él.
+  useEffect(() => {
+    if (!known) return;
+    setProject(id);
+    location.replace('#/config/proyecto');
+  }, [known, id, setProject]);
+  const selected: ConfigProjectView | null = full.projects.find((p) => p.id === (known ? id : projectId)) ?? (id ? null : full.projects[0] ?? null);
   const onSaved = async () => { await reload(); setVersion((v) => v + 1); };
-  const form = selected
+  return selected
     ? <ProjectForm key={`${selected.id}:${version}`} full={full} project={selected} onDirty={onDirty} onSaved={onSaved} />
     : id ? <p className="muted">El proyecto <code>{id}</code> no existe.</p> : <p className="muted">No hay proyectos en la config.</p>;
-  if (full.projects.length < 2) return form;
-  return (
-    <div className={`config-grid${id ? ' has-sel' : ''}`}>
-      <Back label="Proyectos" onClick={() => go('#/config/proyecto')} />
-      <div className="clist">
-        {full.projects.map((p) => {
-          const current = selected?.id === p.id;
-          return (
-            <button key={p.id} type="button" className={`cli${current ? ' on' : ''}`} aria-current={current || undefined}
-              onClick={() => go(`#/config/proyecto/${encodeURIComponent(p.id)}`)}>
-              <span className="cli-main">{p.name}<small>{p.baseBranch}</small></span>
-              <span className={`tag${p.origin === 'config' ? '' : ' p'}`}>{p.origin}</span>
-            </button>
-          );
-        })}
-      </div>
-      {form}
-    </div>
-  );
 }
 
 function GeneralTab({ full, onDirty, reload }: Pick<SimpleTabProps, 'full' | 'onDirty' | 'reload'>) {

@@ -1,27 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Spend, Task } from '../../server/types';
-import { api, mergeTasks, subscribe, type ConfigView } from '../api';
+import { api, mergeTasks, subscribe } from '../api';
 import { loadSeen, navSection, SEEN_EVENT, SEEN_KEY, seedSeenIfMissing, unreadChats, type NavSection } from '../chats';
 import { formatUsd } from '../format';
 import { inboxSections } from '../inbox';
 import { Logo } from './Logo';
+import { leavesOnProjectChange, useCurrentProject, useProject, useProjectState } from '../project';
 
 const ACTIVE = new Set<Task['state']>(['working', 'queued']);
 
-/** Tareas (para el contador de la bandeja y el punto de chats), gasto de hoy y chats vistos; comparte la conexión SSE. */
-function useNavData() {
+/** Tareas del proyecto (para el contador de la bandeja y el punto de chats), su gasto de hoy y chats vistos; comparte la conexión SSE. */
+function useNavData(projectId: string | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [spend, setSpend] = useState<Spend | null>(null);
   const [seen, setSeen] = useState<Record<string, string>>(loadSeen);
   const states = useRef(new Map<string, Task['state']>());
 
   useEffect(() => {
+    if (!projectId) return;
     let ignore = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const loadSpend = () => { api.stats().then((s) => { if (!ignore) setSpend(s.spend); }).catch(() => {}); };
+    setTasks([]);
+    setSpend(null);
+    states.current.clear();
+    const loadSpend = () => { api.stats(projectId).then((s) => { if (!ignore) setSpend(s.spend); }).catch(() => {}); };
     const loadSpendSoon = () => { clearTimeout(timer); timer = setTimeout(loadSpend, 1000); };
     const refresh = () => {
-      api.tasks().then((list) => {
+      api.tasks(projectId).then((list) => {
         if (ignore) return;
         seedSeenIfMissing(list);
         for (const t of list) states.current.set(t.id, t.state);
@@ -30,7 +35,7 @@ function useNavData() {
       loadSpend();
     };
     const off = subscribe((m) => {
-      if (m.type !== 'task') return;
+      if (m.type !== 'task' || m.task.projectId !== projectId) return;
       const before = states.current.get(m.task.id);
       states.current.set(m.task.id, m.task.state);
       // Al terminar una ejecución cambia el gasto.
@@ -47,7 +52,7 @@ function useNavData() {
       window.removeEventListener(SEEN_EVENT, onSeen);
       window.removeEventListener('storage', onStorage);
     };
-  }, []);
+  }, [projectId]);
 
   return { tasks, spend, seen };
 }
@@ -72,11 +77,33 @@ function Icon({ name }: { name: NavSection | 'mas' }) {
   );
 }
 
+/** Selector del proyecto actual; no se pinta con un solo proyecto. */
+function ProjectPicker({ className }: { className: string }) {
+  const { projectId, projects, setProject } = useProject();
+  if (projects.length < 2 || !projectId) return null;
+  return (
+    <label className={className}>
+      <select value={projectId} onChange={(e) => {
+        const id = e.target.value;
+        // En una tarea (o un seguimiento) de otro proyecto la página volvería a cambiarlo: primero se va a Inicio y,
+        // ya fuera de ella, se cambia el proyecto.
+        if (!leavesOnProjectChange(location.hash)) { setProject(id); return; }
+        addEventListener('hashchange', () => setProject(id), { once: true });
+        location.hash = '#/';
+      }} aria-label="Proyecto">
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function PlusMenu({ route, metrics, aso }: { route: string; metrics: boolean; aso: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setOpen(false); }, [route]);
+  // Al cambiar de página o de proyecto (el selector está dentro del menú), se cierra.
+  const { projectId } = useProject();
+  useEffect(() => { setOpen(false); }, [route, projectId]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
@@ -93,6 +120,7 @@ function PlusMenu({ route, metrics, aso }: { route: string; metrics: boolean; as
       </button>
       {open && (
         <div className="plus-menu" role="menu">
+          <ProjectPicker className="plus-project" />
           <a role="menuitem" href="#/nueva" onClick={() => setOpen(false)}>Nueva tarea</a>
           <a role="menuitem" href="#/chat/nuevo" onClick={() => setOpen(false)}>Nuevo chat</a>
           <hr className="plus-sep" />
@@ -106,36 +134,17 @@ function PlusMenu({ route, metrics, aso }: { route: string; metrics: boolean; as
   );
 }
 
-/** Lo que la navegación necesita de la config: nombre del panel y qué secciones opcionales tiene algún proyecto. */
+/** Lo que la navegación necesita de la config: nombre del panel y qué secciones opcionales (Métricas, ASO, Plan) tiene el proyecto actual. */
 function useNavConfig() {
-  const [cfg, setCfg] = useState<ConfigView | null>(null);
-  useEffect(() => {
-    let ignore = false;
-    let seq = 0;
-    const load = () => {
-      const mine = ++seq;
-      api.config().then((c) => {
-        // Una respuesta vieja que llega después de otra más nueva se descarta.
-        if (ignore || mine !== seq) return;
-        setCfg(c);
-        document.title = c.title;
-      }).catch(() => {});
-    };
-    // El panel de configuración emite `config` al guardar: el título y las secciones se ponen al día sin recargar.
-    const off = subscribe((m) => { if (m.type === 'config') load(); }, load);
-    load();
-    return () => { ignore = true; off(); };
-  }, []);
-  return {
-    title: cfg?.title ?? 'Faro',
-    metrics: cfg?.projects.some((p) => p.metrics) ?? false,
-    aso: cfg?.projects.some((p) => p.aso) ?? false,
-  };
+  const { config } = useProjectState();
+  const cur = useCurrentProject();
+  return { title: config?.title ?? 'Faro', metrics: cur?.metrics ?? false, aso: cur?.aso ?? false, plan: cur?.plan ?? false };
 }
 
 /** Navegación fija: barra lateral en pantallas anchas y barra inferior con «+» en el móvil (< 768 px). */
 export function Nav({ route }: { route: string }) {
-  const { tasks, spend, seen } = useNavData();
+  const { projectId } = useProject();
+  const { tasks, spend, seen } = useNavData(projectId);
   const show = useNavConfig();
   const need = inboxSections(tasks, new Date()).need.length;
   const unread = unreadChats(tasks, seen).length > 0;
@@ -148,10 +157,11 @@ export function Nav({ route }: { route: string }) {
     <>
       <nav className="sidebar" aria-label="Navegación">
         <a href="#/" className="brand"><Logo size={26} />{show.title}</a>
+        <ProjectPicker className="side-project" />
         <a href="#/" aria-current={cur('inicio')}><Icon name="inicio" /><span className="label">Inicio</span></a>
         <a href="#/bandeja" aria-current={cur('bandeja')}><Icon name="bandeja" /><span className="label">Bandeja</span>{badge}</a>
         <a href="#/chats" aria-current={cur('chats')}><Icon name="chats" /><span className="label">Chats</span>{dot}</a>
-        <a href="#/plan" aria-current={cur('plan')}><Icon name="plan" /><span className="label">Plan</span></a>
+        {show.plan && <a href="#/plan" aria-current={cur('plan')}><Icon name="plan" /><span className="label">Plan</span></a>}
         <a href="#/rutinas" aria-current={cur('rutinas')}><Icon name="rutinas" /><span className="label">Rutinas</span></a>
         {show.metrics && <a href="#/metricas" aria-current={cur('metricas')}><Icon name="metricas" /><span className="label">Métricas</span></a>}
         {show.aso && <a href="#/aso" aria-current={cur('aso')}><Icon name="aso" /><span className="label">ASO</span></a>}
@@ -169,7 +179,7 @@ export function Nav({ route }: { route: string }) {
         <a href="#/bandeja" aria-current={cur('bandeja')}><span className="ico-wrap"><Icon name="bandeja" />{badge}</span>Bandeja</a>
         <a href="#/chats" aria-current={cur('chats')}><span className="ico-wrap"><Icon name="chats" />{dot}</span>Chats</a>
         <PlusMenu route={route} metrics={show.metrics} aso={show.aso} />
-        <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>
+        {show.plan && <a href="#/plan" aria-current={cur('plan')}><span className="ico-wrap"><Icon name="plan" /></span>Plan</a>}
         <a href="#/rutinas" aria-current={cur('rutinas')}><span className="ico-wrap"><Icon name="rutinas" /></span>Rutinas</a>
       </nav>
     </>

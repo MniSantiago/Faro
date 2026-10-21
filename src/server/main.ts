@@ -4,7 +4,7 @@ import path from 'node:path';
 import { ReviewActions } from './actions';
 import { buildApp } from './api';
 import { Bus } from './bus';
-import { runChecks } from './checks';
+import { runTaskChecks } from './checks';
 import { loadRawConfig, normalizeConfig } from './config';
 import { rotateLogs } from './logs';
 import { AsoCollector } from './aso/collector';
@@ -13,7 +13,7 @@ import { MetricsCollector } from './metrics/collector';
 import { appstoreSource } from './metrics/appstore';
 import { posthogSource } from './metrics/posthog';
 import { revenuecatSource } from './metrics/revenuecat';
-import { Notifier } from './notifier';
+import { noticeTitle, Notifier } from './notifier';
 import { LiveConfig } from './overrides';
 import { loadVapid, Push } from './push';
 import { Releases } from './releases';
@@ -52,7 +52,7 @@ releases.recover();
 // GitHub con `gh` (sesión del usuario) solo si algún proyecto lo usa.
 const github = config.projects.some((p) => p.github) ? new GitHub(config.ghBin ?? 'gh') : undefined;
 const orchestrator = new Orchestrator({
-  store, config, bus, runner, workspaces, runChecks, releases, github,
+  store, config, bus, runner, workspaces, runChecks: runTaskChecks, releases, github,
   ghReadToken: () => readSecret('github-lectura'),
 });
 const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator, runner, releases, github });
@@ -99,7 +99,9 @@ if (github) {
   const watcher = new GitHubWatcher({
     store, config, bus, workspaces, releases, github,
     enqueue: (id, p) => orchestrator.enqueue(id, p),
-    notify: (title, body, url) => { push.send({ title, body, url }).catch((e) => console.error('[faro] aviso push falló', e)); },
+    notify: (title, body, url, projectId) => {
+      push.send({ title: noticeTitle(config.projects, title, projectId), body, url }, projectId ? { projectId } : {}).catch((e) => console.error('[faro] aviso push falló', e));
+    },
   });
   let busy = false;
   const guard = (fn: () => Promise<void>) => async () => {

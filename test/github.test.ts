@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { GitHub, checkState } from '../src/server/github';
 import { GitHubWatcher } from '../src/server/github-watch';
 import { prMetaKey, type PrMeta } from '../src/server/integrate';
@@ -36,21 +36,22 @@ function setup(opts: { ci?: boolean; ciProfile?: string } = {}) {
   const bus = new Bus();
   const workspaces = new GitWorkspaces();
   const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env: { FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' }, killGraceMs: 100 });
-  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {}, github: gh });
+  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {}, github: gh });
   const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner, github: gh });
   const enqueued: { id: string; prompt?: string | null }[] = [];
   const notes: string[] = [];
+  const urls: string[] = [];
   let now = new Date();
   const watcher = new GitHubWatcher({
     store, config, bus, workspaces, github: gh, now: () => now,
     enqueue: (id, prompt) => { enqueued.push({ id, prompt }); store.setState(id, 'queued'); },
-    notify: (title) => { notes.push(title); },
+    notify: (title, _body, url) => { notes.push(title); urls.push(url); },
   });
   const read = (): GhState => JSON.parse(readFileSync(ghState, 'utf8'));
   const write = (fn: (s: GhState) => void) => { const s = read(); fn(s); writeFileSync(ghState, JSON.stringify(s)); };
   const setChecks = (n: number, checks: unknown[]) => write((s) => { s.prs.find((p) => p.number === n)!.statusCheckRollup = checks; });
   return {
-    repo, origin, config, store, orch, actions, watcher, enqueued, notes, read, write, setChecks,
+    repo, origin, config, store, orch, actions, watcher, enqueued, notes, urls, read, write, setChecks,
     advance: (ms: number) => { now = new Date(now.getTime() + ms); },
   };
 }
@@ -185,6 +186,8 @@ describe('vigilancia del CI de main', () => {
     s.write((st) => { st.runs = [run('d', 'success'), run('c', 'failure')]; });
     await s.watcher.checkCi();
     expect(s.notes.at(-1)).toBe('El CI de main vuelve a pasar');
+    // Abre el Plan del proyecto, no el del que esté elegido en el dispositivo.
+    expect(s.urls.at(-1)).toBe('/#/plan?p=demo');
   });
 
   it('la tarea de arreglo usa github.ciProfile si está configurado', async () => {

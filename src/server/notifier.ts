@@ -12,6 +12,12 @@ export const STALE_HOURS = 24;
 const STALE_KEY = 'avisos.paradas';
 const STALE_EVERY_MS = 30 * 60_000;
 
+/** Con más de un proyecto el título de un aviso lleva delante el nombre del proyecto (si no lo nombra ya). */
+export function noticeTitle(projects: readonly { id: string; name: string }[], title: string, projectId?: string): string {
+  const found = projectId && projects.length > 1 ? projects.find((p) => p.id === projectId)?.name : undefined;
+  return found && !title.includes(found) ? `${found} · ${title}` : title; // «Cambios sin subir en X» ya lo nombra
+}
+
 /** Escucha el bus y avisa por push de revisiones, preguntas, aprobaciones, pausas de la cola y tareas paradas. */
 export class Notifier {
   private states = new Map<string, TaskState>();
@@ -52,7 +58,7 @@ export class Notifier {
       if (hours < STALE_HOURS) continue;
       next[t.id] = t.updatedAt;
       const what = t.state === 'review' ? 'en revisión' : 'bloqueada';
-      this.notify(`${t.id} lleva ${Math.floor(hours / 24)} d ${what}`, t.title, `/#/tarea/${t.id}`);
+      this.notify(`${t.id} lleva ${Math.floor(hours / 24)} d ${what}`, t.title, `/#/tarea/${t.id}`, t.projectId);
     }
     this.d.store.setMeta(STALE_KEY, next);
   }
@@ -67,8 +73,10 @@ export class Notifier {
     return fresh;
   }
 
-  private notify(title: string, body: string, url: string): void {
-    this.d.push.send({ title, body, url }).catch((e) => console.error('[faro] aviso push falló', e));
+  /** `projectId` permite a cada dispositivo silenciar el proyecto. */
+  private notify(title: string, body: string, url: string, projectId?: string): void {
+    const msg = { title: noticeTitle(this.d.config?.projects ?? [], title, projectId), body, url };
+    (projectId ? this.d.push.send(msg, { projectId }) : this.d.push.send(msg)).catch((e) => console.error('[faro] aviso push falló', e));
   }
 
   private onTask(task: Task): void {
@@ -76,19 +84,19 @@ export class Notifier {
     this.states.set(task.id, task.state);
     const url = `/#/tarea/${task.id}`;
     if (prev !== task.state) {
-      if (task.state === 'review') this.notify(`${task.id} en revisión`, task.title, url);
+      if (task.state === 'review') this.notify(`${task.id} en revisión`, task.title, url, task.projectId);
       // Terminada sin pasar por revisión (se cerró o integró sola); si la aprobaste tú no hace falta aviso.
-      else if (task.state === 'done' && prev === 'working') this.notify(`${task.id} terminada`, (task.summary || task.title).slice(0, 100), url);
-      else if (task.state === 'done' && prev === 'pr') this.notify(`${task.id} integrada`, `PR fusionado · ${task.title}`.slice(0, 100), url);
-      else if (task.state === 'blocked') this.notify(this.blockedTitle(task), task.questions?.[0]?.text || task.blockedReason || 'Necesita tu ayuda', url);
+      else if (task.state === 'done' && prev === 'working') this.notify(`${task.id} terminada`, (task.summary || task.title).slice(0, 100), url, task.projectId);
+      else if (task.state === 'done' && prev === 'pr') this.notify(`${task.id} integrada`, `PR fusionado · ${task.title}`.slice(0, 100), url, task.projectId);
+      else if (task.state === 'blocked') this.notify(this.blockedTitle(task), task.questions?.[0]?.text || task.blockedReason || 'Necesita tu ayuda', url, task.projectId);
       else if (task.state === 'idle' && task.kind === 'chat' && prev !== undefined) {
-        this.notify('El Coordinador ha respondido', (task.summary ?? '').slice(0, 100), url);
+        this.notify('El Coordinador ha respondido', (task.summary ?? '').slice(0, 100), url, task.projectId);
       }
     }
     for (const a of this.markApprovals(task.id)) {
       if (a.action === 'push') { this.onPushPending(task.projectId); continue; }
       const label = ACTION_LABEL[a.action];
-      if (label) this.notify(`Aprobación pendiente: ${label}`, `${task.id} · ${task.title}`, url);
+      if (label) this.notify(`Aprobación pendiente: ${label}`, `${task.id} · ${task.title}`, url, task.projectId);
     }
     if (this.pushNotified.has(task.projectId) && this.d.store.listPendingApprovals(task.projectId, 'push').length === 0) {
       this.pushNotified.delete(task.projectId);
@@ -100,7 +108,7 @@ export class Notifier {
     if (this.pushNotified.has(projectId)) return;
     this.pushNotified.add(projectId);
     const name = this.d.config?.projects.find((p) => p.id === projectId)?.name ?? projectId;
-    this.notify(`Cambios sin subir en ${name}`, 'Súbelos todos de una vez desde la bandeja.', '/#/bandeja');
+    this.notify(`Cambios sin subir en ${name}`, 'Súbelos todos de una vez desde la bandeja.', `/#/bandeja?p=${projectId}`, projectId);
   }
 
   private blockedTitle(task: Task): string {

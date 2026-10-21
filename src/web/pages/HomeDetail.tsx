@@ -3,7 +3,7 @@ import { api, type HomeMetric, type MetricsView, type SeriesView } from '../api'
 import { Funnel } from '../components/Funnel';
 import { LineChart } from '../components/LineChart';
 import { deltaTone, formatDelta, formatMetric, METRIC_FORMAT, rowFormat } from '../home';
-import { useHomeProject } from './Home';
+import { useProject } from '../project';
 
 const TITLE: Record<HomeMetric, string> = { descargas: 'Descargas', conversion: 'Conversión', mrr: 'MRR', gasto: 'Gasto de Faro' };
 const PERIODS = [7, 30, 90] as const;
@@ -15,7 +15,7 @@ const currentLabel = (metric: HomeMetric, days: number) =>
 
 /** Vista de detalle de una cifra de la home (`#/inicio/<cifra>`): gráfica con periodo, valor, variación y desgloses. */
 export function HomeDetail({ metric }: { metric: HomeMetric }) {
-  const { projects, project, loaded, error: configError } = useHomeProject();
+  const { projects, projectId: project } = useProject();
   const [days, setDays] = useState<Period>(30);
   const [series, setSeries] = useState<SeriesView | null>(null);
   const [metrics, setMetrics] = useState<MetricsView | null>(null);
@@ -42,10 +42,10 @@ export function HomeDetail({ metric }: { metric: HomeMetric }) {
     return () => { ignore = true; };
   }, [project, metric, hasMetrics]);
 
-  const err = configError ?? error;
+  const err = error;
   const back = <a href="#/" className="back">← Inicio</a>;
   if (err && !series) return <div className="home-detail">{back}<p className="error" role="alert">{err}</p></div>;
-  if (loaded && !project) return <div className="home-detail">{back}<p className="muted">No hay proyectos en faro.config.ts.</p></div>;
+  if (!project) return <div className="home-detail">{back}<p className="muted">No hay proyectos en faro.config.ts.</p></div>;
 
   const format = METRIC_FORMAT[metric];
   const tone = series ? deltaTone(series.deltaPct, metric !== 'gasto') : 'muted';

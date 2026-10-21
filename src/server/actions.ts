@@ -1,12 +1,14 @@
 import { existsSync } from 'node:fs';
-import { getProfile, getProject } from './config';
+import { getProfile, getProject, isMultiRepo } from './config';
 import { closeFinishedParent, integrate, prMetaKey, type IntegrateDeps, type IntegrateResult, type PrMeta } from './integrate';
 import type { Orchestrator } from './orchestrator';
 import type { Runner } from './runner/runner';
-import type { Level, Release, Task, TaskState } from './types';
+import type { Level, ProjectConfig, Release, Task, TaskState } from './types';
 
 import { ActionError, BadRequestError } from './errors';
-import { assertNotIntegrating } from './locks';
+import { aheadTaskProject, pushFailureMessage, pushTaskProject } from './integrate-multi';
+import { assertNotIntegrating, withProjectIntegrationLock } from './locks';
+import { cleanupTask, commitTask, discardTask, saveTaskWork } from './task-workspace';
 import { MAX_SUBTASK_LEVEL } from './subtasks';
 import { formatAnswers, validateAnswers, type Answers } from './questions';
 
@@ -22,6 +24,7 @@ export interface CreateTaskInput {
   routineId?: string | null;
   release?: Release;
   parentId?: string | null;
+  repos?: string[];
 }
 
 /** Título del chat: su primer mensaje en una línea, cortado por palabra a 60 caracteres. */
@@ -63,6 +66,7 @@ export class ReviewActions {
     const t = this.d.store.createTask(project, {
       title: i.title.trim(), description: i.description, profileId: profile.id, level: i.level ?? profile.defaultLevel,
       parentId: i.parentId ?? null, routineId: i.routineId ?? null, release: i.release ?? 'none',
+      repos: i.repos,
     });
     this.d.bus.emitTask(t);
     if (!i.draft) this.d.orchestrator.enqueue(t.id);
@@ -183,21 +187,32 @@ export class ReviewActions {
             `Descartada sin tocar la rama ni el worktree: los sigue usando ${sharers.map((o) => o.id).join(', ')}.`);
           this.d.bus.emitTask(this.d.store.getTask(id));
         } else {
-          if (t.worktreePath && existsSync(t.worktreePath)) {
+          const project = getProject(this.d.config, t.projectId);
+          const message = `${id}: descartada (trabajo sin terminar)`;
+          if (isMultiRepo(project)) {
+            // Cada repo por su cuenta: si falta el worktree de uno, lo de los demás se guarda igual.
+            const notes = t.worktreePath ? await saveTaskWork(this.d.workspaces, project, t, message) : [];
+            if (notes.length) {
+              this.d.store.addComment(id, 'faro', `Al descartar: ${notes.join('; ')}.`);
+              this.d.bus.emitTask(this.d.store.getTask(id));
+            }
+          } else if (t.worktreePath && existsSync(t.worktreePath)) {
             // Guarda el trabajo sin commitear en la rama antes de archivarla.
-            await this.d.workspaces.commitAll(t.worktreePath, `${id}: descartada (trabajo sin terminar)`).catch(() => false);
+            await commitTask(this.d.workspaces, project, t, message).catch(() => false);
           }
           try {
-            await this.d.workspaces.discard(getProject(this.d.config, t.projectId), t);
+            await discardTask(this.d.workspaces, project, t);
           } catch (e) {
             this.d.store.addComment(id, 'faro', `Descartada, pero no se pudo limpiar el worktree: ${(e as Error).message}`);
             this.d.bus.emitTask(this.d.store.getTask(id));
           }
         }
       } else if (t.worktreePath) {
-        // Chats: worktree separado sin rama.
+        // Chats: worktree separado sin rama (multi-repo: uno por repo dentro de la carpeta del chat).
         try {
-          await this.d.workspaces.removeWorktree(getProject(this.d.config, t.projectId), t.worktreePath);
+          const project = getProject(this.d.config, t.projectId);
+          if (isMultiRepo(project)) await cleanupTask(this.d.workspaces, project, t);
+          else await this.d.workspaces.removeWorktree(project, t.worktreePath);
         } catch (e) {
           this.d.store.addComment(id, 'faro', `Archivado, pero no se pudo borrar el worktree: ${(e as Error).message}`);
           this.d.bus.emitTask(this.d.store.getTask(id));
@@ -223,36 +238,42 @@ export class ReviewActions {
     });
   }
 
-  /** Sube la rama base del proyecto y da por aprobados todos sus push pendientes (un solo push para todo). */
+  /** Sube la rama base del proyecto (de cada repo) y da por aprobados todos sus push pendientes (un solo push para todo). */
   pushProject(projectId: string): Promise<void> {
-    return this.exclusive(`push:${projectId}`, async () => {
+    return this.exclusive(`push:${projectId}`, () => withProjectIntegrationLock(projectId, async () => {
       const project = getProject(this.d.config, projectId);
       const pending = this.d.store.listPendingApprovals(projectId, 'push');
-      if (pending.length === 0 && (await this.d.workspaces.ahead(project)) === 0) {
+      if (pending.length === 0 && (await aheadTaskProject(this.d.workspaces, project)) === 0) {
         throw new ActionError(`${project.name} no tiene cambios sin subir`);
       }
-      try {
-        await this.d.workspaces.push(project);
-      } catch (e) {
-        throw new ActionError(`El push falló: ${(e as Error).message}`);
-      }
+      await this.pushAll(project);
       for (const a of pending) this.d.store.decideApproval(a.id, 'approved');
       for (const taskId of new Set(pending.map((a) => a.taskId))) this.d.bus.emitTask(this.d.store.getTask(taskId));
-    });
+    }));
   }
 
   approvePush(id: string): Promise<void> {
-    return this.exclusive(id, async () => {
+    return this.exclusive(id, () => withProjectIntegrationLock(this.d.store.getTask(id).projectId, async () => {
       const t = this.d.store.getTask(id);
       const pending = this.d.store.listApprovals(id).filter((a) => a.action === 'push' && a.state === 'pending');
       if (pending.length === 0) throw new ActionError(`${id} no tiene un push pendiente`);
-      try {
-        await this.d.workspaces.push(getProject(this.d.config, t.projectId));
-      } catch (e) {
-        throw new ActionError(`El push falló: ${(e as Error).message}`);
-      }
+      await this.pushAll(getProject(this.d.config, t.projectId));
       for (const a of pending) this.d.store.decideApproval(a.id, 'approved');
       this.d.bus.emitTask(this.d.store.getTask(id));
-    });
+    }));
+  }
+
+  /** Push de la rama base (de cada repo, en multi-repo); si falta alguno, ActionError con lo subido y lo que falta. */
+  private async pushAll(project: ProjectConfig): Promise<void> {
+    if (isMultiRepo(project)) {
+      const r = await pushTaskProject(this.d.workspaces, project);
+      if (r.failed.length) throw new ActionError(pushFailureMessage(r));
+      return;
+    }
+    try {
+      await this.d.workspaces.push(project);
+    } catch (e) {
+      throw new ActionError(`El push falló: ${(e as Error).message}`);
+    }
   }
 }

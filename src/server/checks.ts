@@ -1,5 +1,7 @@
+import { isMultiRepo } from './config';
 import { shAbortable } from './exec';
-import type { ProjectConfig } from './types';
+import { taskRepos } from './task-repos';
+import type { ProjectConfig, Task } from './types';
 
 export interface CheckResult {
   name: string;
@@ -41,6 +43,31 @@ export async function runChecks(
     if (r.code === 124) output += '\n[tiempo agotado]';
     if (r.code === 130) output += '\n[cancelada]';
     results.push({ name: c.name, ok: r.code === 0, skipped: false, aborted: r.code === 130, output, durationMs: Date.now() - start });
+  }
+  return results;
+}
+
+/**
+ * Comprobaciones de la tarea en cada uno de sus repos, cada una en su worktree y con los archivos de ese repo
+ * (sin prefijo: `whenChanged` es relativo al repo). Multi-repo: el nombre lleva delante el del repo, y las de un repo que la
+ * tarea no cambió quedan omitidas sin ejecutarse (no cuentan como probadas). Un repo: runChecks tal cual.
+ */
+export async function runTaskChecks(
+  project: ProjectConfig,
+  task: Task,
+  byRepo: Record<string, string[]>,
+  opts: CheckOptions = {},
+): Promise<CheckResult[]> {
+  if (!task.worktreePath) throw new Error(`La tarea ${task.id} no tiene worktree`);
+  if (!isMultiRepo(project)) return runChecks(project, task.worktreePath, byRepo[project.repos![0].id] ?? [], opts);
+  const results: CheckResult[] = [];
+  for (const tr of taskRepos(project, task)) {
+    const label = tr.repo.name ?? tr.repo.id;
+    const changed = byRepo[tr.repo.id] ?? [];
+    const rs = changed.length
+      ? await runChecks(tr.project, tr.task.worktreePath!, changed, opts)
+      : (tr.project.checks ?? []).map((c): CheckResult => ({ name: c.name, ok: true, skipped: true, aborted: false, output: '', durationMs: 0 }));
+    results.push(...rs.map((r) => ({ ...r, name: `${label} · ${r.name}` })));
   }
   return results;
 }

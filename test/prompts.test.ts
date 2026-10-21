@@ -19,6 +19,45 @@ describe('prompts', () => {
     expect(buildSystemPrompt(profile, project, 1)).toContain('solo lectura');
   });
 
+  it('sin instrucciones el prompt es idéntico al de hoy', () => {
+    expect(buildSystemPrompt(profile, project, 2)).toMatchInlineSnapshot(`
+      "Eres el agente «iOS» de Faro y trabajas en el proyecto Demo.
+      Instrucciones iOS.
+
+      Reglas de Faro:
+      - Trabajas en un git worktree aislado, en tu propia rama. No cambies de rama ni hagas merge, push, builds de EAS ni publiques nada: de eso se encarga Faro.
+      - No hace falta que hagas commit: Faro commitea los cambios del worktree al terminar.
+      - Si generas capturas, vídeos u otros archivos para revisión, guárdalos en .faro/artifacts/ y lista sus rutas en "artifacts".
+      - Si te falta información o una decisión del usuario para continuar, termina con "status": "blocked" y pon tus preguntas en "questions" (máx. 4). Siempre que puedas, da 2-4 opciones concretas en "options", con la que recomiendas primero; usa "multiple": true si se pueden elegir varias.
+      - Si el trabajo se divide mejor en tareas independientes para otros perfiles, propónlas en "subtasks": [{"title", "description", "profileId", "level"}] (nivel 1 consulta, 2 borrador, 3 integración automática). El usuario las aprueba antes de que empiecen.
+      - Termina SIEMPRE tu último mensaje con un bloque como este, con JSON válido:
+      \`\`\`faro-result
+      {"status": "done", "summary": "qué hiciste, en 1-3 frases", "artifacts": [], "questions": []}
+      \`\`\`
+      Ejemplo de pregunta: {"status": "blocked", "summary": "…", "questions": [{"id": "color", "text": "¿Qué color uso para el botón?", "options": ["Ámbar (el de la marca)", "Azul"]}]}"
+    `);
+  });
+
+  it('añade instrucciones y notas del proyecto tras las del perfil', () => {
+    const proj = { ...project, instructions: 'Demo es una app.', profileNotes: { ios: 'Nota iOS.', web: 'Nota web.' } };
+    const p = buildSystemPrompt(profile, proj, 2);
+    expect(p).toContain('Instrucciones iOS.\nSobre Demo:\nDemo es una app.\nNota iOS.\n\nReglas de Faro:');
+    expect(p).not.toContain('Nota web.');
+    // Solo notas, sin instrucciones del proyecto.
+    const solo = buildSystemPrompt(profile, { ...project, profileNotes: { ios: 'Nota iOS.' } }, 2);
+    expect(solo).toContain('Instrucciones iOS.\nSobre Demo:\nNota iOS.\n\nReglas de Faro:');
+  });
+
+  it('multi-repo lista las subcarpetas', () => {
+    const repos = [
+      { id: 'api', name: 'API', path: '/x/api', baseBranch: 'main', remote: 'origin' },
+      { id: 'web', path: '/x/web', baseBranch: 'main', remote: 'origin' },
+    ];
+    const p = buildSystemPrompt(profile, project, 2, { repos });
+    expect(p).toContain('Tu carpeta tiene un repo por subcarpeta: api/ (API), web/ (web). Cada una es un git worktree en tu rama.');
+    expect(buildSystemPrompt(profile, project, 2)).not.toContain('subcarpeta');
+  });
+
   it('el prompt de tarea incluye id, título, descripción y contexto del padre', () => {
     const parent = makeTask({ id: 'DEM-3', title: 'Objetivo', description: 'Contexto grande' });
     const p = buildTaskPrompt(makeTask({ id: 'DEM-4', title: 'Hacer X', description: 'Detalles' }), parent);
@@ -129,5 +168,15 @@ describe('prompts de chat', () => {
     expect(p).toContain('copia de solo lectura');
     expect(p).not.toContain('propia rama');
     expect(buildChatOpening()).toBe('Empieza una conversación nueva con el usuario.');
+  });
+
+  it('el chat añade a cada perfil su nota del proyecto y las instrucciones del proyecto van antes de la lista', () => {
+    const coord = { id: 'coordinador', name: 'Coordinador', instructions: 'Divides objetivos.', defaultLevel: 1 as const, timeoutMinutes: 20 };
+    const ios = { id: 'ios', name: 'iOS', instructions: 'Trabajas en la app. Añades tests.', defaultLevel: 2 as const, timeoutMinutes: 45 };
+    const proj = { ...makeConfig(makeRepo()).projects[0], name: 'Demo', instructions: 'Demo es una app.', profileNotes: { ios: 'En Demo, carpeta app/.' } };
+    const p = buildSystemPrompt(coord, proj, 1, { chat: true, profiles: [coord, ios] });
+    expect(p).toContain('- ios (iOS): Trabajas en la app. En Demo, carpeta app/.');
+    expect(p.indexOf('Sobre Demo:\nDemo es una app.')).toBeGreaterThan(p.indexOf('Divides objetivos.'));
+    expect(p.indexOf('Sobre Demo:')).toBeLessThan(p.indexOf('Estás en una conversación'));
   });
 });

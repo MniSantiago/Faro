@@ -36,13 +36,21 @@ describe('formulario de proyecto', () => {
     expect(b).toEqual({
       ok: true,
       body: {
-        baseBranch: 'main', github: { ci: true, prs: null, ciProfile: 'dev' }, backlogFile: null, contextWindow: 200000,
+        baseBranch: 'main', github: { ci: true, prs: null, ciProfile: 'dev' }, backlogFile: null, contextWindow: 200000, maxConcurrentRuns: null,
         metrics: {
           revenuecatProjectId: null, posthogHost: 'https://eu.posthog.com', posthogProjectId: null, ascAppId: null, ascVendorNumber: null,
           posthogFunnel: { steps: [{ event: 'a', label: 'A' }] },
         },
       },
     });
+  });
+  it('agentes a la vez: vacío es el de Faro (null); si no, un entero mayor que 0', () => {
+    const f = formFromProject({ baseBranch: 'main', github: null, backlogFile: null, contextWindow: null, maxConcurrentRuns: 3, metrics: null });
+    expect(f.maxConcurrent).toBe('3');
+    expect(projectToBody(f)).toMatchObject({ ok: true, body: { maxConcurrentRuns: 3 } });
+    expect(projectToBody({ ...f, maxConcurrent: '' })).toMatchObject({ ok: true, body: { maxConcurrentRuns: null } });
+    expect(projectToBody({ ...f, maxConcurrent: '0' })).toEqual({ ok: false, error: 'Los agentes a la vez deben ser un entero mayor que 0' });
+    expect(projectSame({ ...f, maxConcurrent: '4' }, f)).toBe(false);
   });
   it('la ventana de contexto solo admite dígitos', () => {
     const f = formFromProject({ baseBranch: 'main', github: null, backlogFile: null, contextWindow: null, metrics: null });
@@ -81,7 +89,8 @@ describe('formulario de generales', () => {
   it('sin vigilancia manda null y valida los números', () => {
     const f = formFromGeneral({ title: 'Faro', maxConcurrentRuns: 1, coordinatorProfile: 'c', retryWatchdog: null });
     expect(generalToBody({ ...f, title: '' })).toMatchObject({ ok: true, body: { title: null, retryWatchdog: null } });
-    expect(generalToBody({ ...f, maxConcurrent: '0' })).toEqual({ ok: false, error: 'Las ejecuciones simultáneas deben ser un entero mayor que 0' });
+    expect(generalToBody({ ...f, maxConcurrent: '0' })).toEqual({ ok: false, error: 'El límite global de agentes debe ser un entero mayor que 0' });
+    expect(generalToBody({ ...f, maxConcurrent: '' })).toMatchObject({ ok: true, body: { maxConcurrentRuns: null } });
     expect(generalToBody({ ...f, maxWait: '-1' })).toEqual({ ok: false, error: 'La espera máxima debe ser un número de minutos (0 o más)' });
     expect(generalSame({ ...f, enabled: 'off' }, f)).toBe(false);
   });

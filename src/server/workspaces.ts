@@ -16,10 +16,12 @@ export type MergeResult = { ok: true } | { ok: false; conflict: boolean; output:
 export type BaseMergeResult = { status: 'clean' } | { status: 'conflict'; files: string[]; output: string };
 
 export interface Workspaces {
-  create(project: ProjectConfig, task: Task): Promise<WorktreeRef>;
+  /** `at`: ruta exacta del worktree (por defecto worktreesDir/<rama>). */
+  create(project: ProjectConfig, task: Task, at?: string): Promise<WorktreeRef>;
   restore(project: ProjectConfig, task: Task): Promise<void>;
   commitAll(worktreePath: string, message: string): Promise<boolean>;
-  diff(project: ProjectConfig, task: Task): Promise<{ patch: string; files: string[] }>;
+  /** `prefix` (p. ej. `web/`) se antepone a las rutas del patch y de los archivos. */
+  diff(project: ProjectConfig, task: Task, opts?: { prefix?: string }): Promise<{ patch: string; files: string[] }>;
   merge(project: ProjectConfig, task: Task): Promise<MergeResult>;
   updateBranch(project: ProjectConfig, task: Task): Promise<MergeResult>;
   syncBase(project: ProjectConfig): Promise<{ ok: boolean; output: string }>;
@@ -61,7 +63,7 @@ export function realOr(p: string): string {
 }
 
 /** Ruta del worktree que tiene `branch` en checkout, o null. */
-function worktreeFor(porcelain: string, branch: string): string | null {
+export function worktreeFor(porcelain: string, branch: string): string | null {
   for (const block of porcelain.split('\n\n')) {
     const lines = block.split('\n');
     if (lines.includes(`branch refs/heads/${branch}`)) {
@@ -102,10 +104,10 @@ async function linkStaysInside(root: string, link: string): Promise<boolean> {
 }
 
 export class GitWorkspaces implements Workspaces {
-  async create(project: ProjectConfig, task: Task): Promise<WorktreeRef> {
+  async create(project: ProjectConfig, task: Task, at?: string): Promise<WorktreeRef> {
     const branch = `${task.id}-${slugify(task.title)}`;
-    const wtPath = path.join(project.worktreesDir, branch);
-    await fs.mkdir(project.worktreesDir, { recursive: true });
+    const wtPath = at ?? path.join(project.worktreesDir, branch);
+    await fs.mkdir(path.dirname(wtPath), { recursive: true });
     await gitOk(project.repoPath, ['worktree', 'add', '-b', branch, wtPath, project.baseBranch]);
     try {
       await this.prepareWorktree(project, wtPath);
@@ -196,12 +198,14 @@ export class GitWorkspaces implements Workspaces {
     for (const rel of bad) await gitOk(worktreePath, ['reset', '-q', '--', rel]);
   }
 
-  async diff(project: ProjectConfig, task: Task): Promise<{ patch: string; files: string[] }> {
+  async diff(project: ProjectConfig, task: Task, opts: { prefix?: string } = {}): Promise<{ patch: string; files: string[] }> {
     const { branch } = requireBranch(task);
     const range = `${project.baseBranch}...${branch}`;
-    const patch = await gitOk(project.repoPath, ['diff', range]);
+    const prefix = opts.prefix ?? '';
+    const prefixArgs = prefix ? [`--src-prefix=a/${prefix}`, `--dst-prefix=b/${prefix}`] : [];
+    const patch = await gitOk(project.repoPath, ['diff', ...prefixArgs, range]);
     const names = await gitOk(project.repoPath, ['diff', '--name-only', range]);
-    return { patch, files: names.split('\n').filter(Boolean) };
+    return { patch, files: names.split('\n').filter(Boolean).map((f) => prefix + f) };
   }
 
   /** Merge de la rama base en la rama de la tarea (en su worktree); si choca, lo deshace. */
@@ -269,13 +273,45 @@ export class GitWorkspaces implements Workspaces {
     if (!/non-fast-forward|fetch first|rejected/.test(out)) throw new Error(`git push ${remote} ${baseBranch} falló: ${out}`);
     await gitOk(repoPath, ['fetch', remote, baseBranch]);
     const basePath = worktreeFor(await gitOk(repoPath, ['worktree', 'list', '--porcelain']), baseBranch);
-    if (!basePath) throw new Error(`${remote} tiene commits nuevos y ${baseBranch} no está en ningún checkout para fusionarlos`);
+    if (!basePath) {
+      await this.mergeRemoteWithoutCheckout(project);
+      await gitOk(repoPath, ['push', remote, baseBranch]);
+      return;
+    }
     const merged = await git(basePath, ['merge', '--no-edit', `${remote}/${baseBranch}`]);
     if (merged.code !== 0) {
       await git(basePath, ['merge', '--abort']);
       throw new Error(`Lo nuevo de ${remote}/${baseBranch} choca con ${baseBranch}; fusiónalo a mano: ${(merged.stdout + merged.stderr).trim()}`);
     }
     await gitOk(repoPath, ['push', remote, baseBranch]);
+  }
+
+  /**
+   * La base no está en ningún checkout: fusiona `remote/base` en un worktree detached temporal y avanza
+   * `refs/heads/base` con update-ref comprobando el valor viejo (si cambió mientras tanto, falla sin pisar nada).
+   */
+  private async mergeRemoteWithoutCheckout(project: ProjectConfig): Promise<void> {
+    const { repoPath, remote, baseBranch } = project;
+    const tmp = path.join(project.worktreesDir, `_push-${baseBranch}-${process.pid}`);
+    await fs.mkdir(project.worktreesDir, { recursive: true });
+    try {
+      const oldSha = (await gitOk(repoPath, ['rev-parse', `refs/heads/${baseBranch}`])).trim();
+      await gitOk(repoPath, ['worktree', 'add', '--detach', tmp, oldSha]);
+      const merged = await git(tmp, ['merge', '--no-edit', `${remote}/${baseBranch}`]);
+      if (merged.code !== 0) {
+        await git(tmp, ['merge', '--abort']);
+        throw new Error(`Lo nuevo de ${remote}/${baseBranch} choca con ${baseBranch}; fusiónalo a mano: ${(merged.stdout + merged.stderr).trim()}`);
+      }
+      const newSha = (await gitOk(tmp, ['rev-parse', 'HEAD'])).trim();
+      const moved = await git(repoPath, ['update-ref', `refs/heads/${baseBranch}`, newSha, oldSha]);
+      if (moved.code !== 0) {
+        throw new Error(`${baseBranch} cambió mientras se fusionaba lo nuevo de ${remote}; vuelve a intentarlo: ${(moved.stdout + moved.stderr).trim()}`);
+      }
+    } finally {
+      await git(repoPath, ['worktree', 'remove', '--force', tmp]);
+      await fs.rm(tmp, { recursive: true, force: true });
+      await git(repoPath, ['worktree', 'prune']);
+    }
   }
 
   /**

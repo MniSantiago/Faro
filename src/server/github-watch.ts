@@ -19,7 +19,7 @@ interface CiMeta { sha: string; failing: boolean; taskId: string | null }
 export interface WatchDeps extends IntegrateDeps {
   github: GitHub;
   enqueue: (taskId: string, nextPrompt?: string | null) => void;
-  notify: (title: string, body: string, url: string) => void;
+  notify: (title: string, body: string, url: string, projectId?: string) => void;
   now?: () => Date;
 }
 
@@ -127,7 +127,7 @@ export class GitHubWatcher {
     const failed = shaRuns.filter((r) => FAILED_RUN.has(r.conclusion));
     if (!failed.length) {
       store.setMeta(key, { sha, failing: false, taskId: null } satisfies CiMeta);
-      if (prev?.failing) this.d.notify(`El CI de ${project.baseBranch} vuelve a pasar`, `${project.name} · ${sha.slice(0, 7)}`, '/#/plan');
+      if (prev?.failing) this.d.notify(`El CI de ${project.baseBranch} vuelve a pasar`, `${project.name} · ${sha.slice(0, 7)}`, `/#/plan?p=${project.id}`, project.id);
       return;
     }
     const run = failed[0];
@@ -153,7 +153,7 @@ export class GitHubWatcher {
       this.d.enqueue(t.id);
     }
     store.setMeta(key, { sha, failing: true, taskId } satisfies CiMeta);
-    this.d.notify(`El CI de ${project.baseBranch} falla`, `${project.name} · ${jobs.join(', ') || failed[0].workflowName} → ${taskId}`, `/#/tarea/${taskId}`);
+    this.d.notify(`El CI de ${project.baseBranch} falla`, `${project.name} · ${jobs.join(', ') || failed[0].workflowName} → ${taskId}`, `/#/tarea/${taskId}`, project.id);
   }
 
   /** Perfil para arreglar el CI: el de `github.ciProfile`; si no, web si solo fallan trabajos de backend, web o landing, o ios. */

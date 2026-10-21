@@ -71,6 +71,18 @@ describe('MetricsCollector', () => {
     expect(collect).toHaveBeenCalledTimes(2);
   });
 
+  it('el colector de Acme pide revenuecat:acme', async () => {
+    const c = config();
+    c.projects.push({ ...c.projects[0], id: 'acme', name: 'Acme', metrics: { revenuecatProjectId: 'p2' } });
+    const asked: [string, string][] = [];
+    const collector = new MetricsCollector({
+      store, config: c, secret: async (n, projectId) => { asked.push([n, projectId]); return null; },
+      sources: [src('revenuecat', async (ctx) => { await ctx.secret('revenuecat'); return { configured: false }; })],
+    });
+    await collector.collectAll();
+    expect(asked.sort()).toEqual([['revenuecat', 'acme'], ['revenuecat', 'demo']]);
+  });
+
   it('redact sustituye primero los secretos más largos', () => {
     expect(redact('x sk_123456 y', ['sk_123', 'sk_123456'])).toBe('x *** y');
   });

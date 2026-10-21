@@ -6,7 +6,7 @@ import { NotFoundError, Store } from '../src/server/store';
 import type { PlanState } from '../src/server/plan';
 import type { RoutineConfig } from '../src/server/types';
 import { GitWorkspaces } from '../src/server/workspaces';
-import { makeConfig, makeRepo } from './helpers';
+import { makeConfig, makeMultiConfig, makeRepo } from './helpers';
 
 const lunes9 = new Date(2026, 9, 19, 9, 0); // lunes 19-10-2026 09:00 local
 const rutina = (over: Partial<RoutineConfig> = {}): RoutineConfig => ({
@@ -14,8 +14,7 @@ const rutina = (over: Partial<RoutineConfig> = {}): RoutineConfig => ({
   title: 'Informe {semana}', prompt: 'Datos hasta {fecha}', ...over,
 });
 
-function setup(routines: RoutineConfig[], start: Date, failing = false, plan?: { state: () => Promise<PlanState> }) {
-  const base = makeConfig(makeRepo());
+function setup(routines: RoutineConfig[], start: Date, failing = false, plan?: { state: () => Promise<PlanState> }, base = makeConfig(makeRepo())) {
   const config = { ...base, projects: [{ ...base.projects[0], routines }] };
   const store = new Store(':memory:');
   const bus = new Bus();
@@ -192,6 +191,13 @@ describe('scheduler', () => {
     });
     store.setState(second.id, 'discarded');
     await expect(sched.runNow('semanal')).rejects.toThrow(`sigue abierta (${first.id})`);
+  });
+
+  it('una rutina con repos crea la tarea con esos repos', async () => {
+    const { sched, config } = setup([rutina({ repos: ['b'] })], new Date(2026, 9, 15, 12, 0), false, undefined, makeMultiConfig());
+    sched.sync();
+    expect(config.projects[0]!.id).toBe('multi');
+    expect((await sched.runNow('semanal')).repos).toEqual(['b']);
   });
 
   it('un fallo en una rutina no impide ejecutar las demás', async () => {

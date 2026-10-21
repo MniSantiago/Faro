@@ -14,6 +14,7 @@ import { Thread } from '../components/Thread';
 import { saveSeen } from '../chats';
 import { buildConversation } from '../conversation';
 import { buildThread } from '../thread';
+import { projectOfTask, shouldSyncProject, useProject } from '../project';
 
 /** Artefacto .md: se lee y se muestra con Markdown. */
 function MdArtifact({ artifact }: { artifact: Artifact }) {
@@ -41,6 +42,17 @@ export function TaskPage({ id }: { id: string }) {
   const [stats, setStats] = useState<TaskStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Una tarea de otro proyecto cambia el proyecto actual al suyo (por el prefijo del id ya antes de cargarla), una vez
+  // por tarea: si luego eliges otro en el selector, no se le lleva de vuelta (y el selector te saca a Inicio).
+  const { projectId, projects, setProject } = useProject();
+  const taskProject = detail?.task.projectId ?? projectOfTask(projects, id);
+  const synced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!taskProject) return;
+    if (shouldSyncProject(synced.current, id, taskProject, projectId)) setProject(taskProject);
+    synced.current = id;
+  }, [id, taskProject, projectId, setProject]);
 
   const reqId = useRef(0);
   const alive = useRef(true);

@@ -1,6 +1,7 @@
 import { git, sh } from './exec';
 import { isConflictTask } from './integrate';
 import type { Store } from './store';
+import { releaseRepo, repoView } from './task-repos';
 import type { ProjectConfig } from './types';
 
 /** El último build de producción en la tienda (según EAS): de qué commit salió. */
@@ -13,8 +14,10 @@ export interface Unshipped {
 
 /** Último build de producción terminado según `eas build:list`, o null si no hay o EAS no responde. */
 export async function fetchStoreBuild(project: ProjectConfig, timeoutMs = 90_000): Promise<StoreBuild | null> {
-  if (!project.release) return null;
-  const r = await sh('npx -y eas-cli build:list --platform ios --status finished --limit 10 --json --non-interactive', `${project.repoPath}/${project.release.cwd}`, timeoutMs);
+  const rr = releaseRepo(project);
+  if (!rr) return null;
+  // El build sale del repo con `release`, que en un proyecto de varios repos puede no ser el primero.
+  const r = await sh('npx -y eas-cli build:list --platform ios --status finished --limit 10 --json --non-interactive', `${rr.path}/${rr.release!.cwd}`, timeoutMs);
   if (r.code !== 0) throw new Error(`EAS no respondió: ${(r.stderr || r.stdout).trim().slice(-300)}`);
   const builds = JSON.parse(r.stdout.slice(r.stdout.indexOf('['))) as {
     buildProfile?: string; appVersion?: string; appBuildVersion?: string; gitCommitHash?: string; createdAt?: string;
@@ -27,7 +30,9 @@ export async function fetchStoreBuild(project: ProjectConfig, timeoutMs = 90_000
  * Lo integrado en la rama base desde `commit` (sin merges), agrupado por tarea según el prefijo del mensaje
  * («DEM-12: …»); los commits sin tarea salen sueltos. Más recientes primero.
  */
-export async function unshipped(project: ProjectConfig, commit: string, store: Pick<Store, 'findTask'>): Promise<Unshipped[]> {
+export async function unshipped(full: ProjectConfig, commit: string, store: Pick<Store, 'findTask'>): Promise<Unshipped[]> {
+  const rr = releaseRepo(full);
+  const project = rr ? repoView(full, rr) : full;
   const r = await git(project.repoPath, ['log', '--no-merges', '--format=%x1e%s%x1f%cI', '--name-only', `${commit}..${project.baseBranch}`]);
   if (r.code !== 0) throw new Error(`No se pudo leer git desde ${commit.slice(0, 9)}: ${r.stderr.trim()}`);
   const byKey = new Map<string, Unshipped>();

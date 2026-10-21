@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConfigFull, ConfigProjectView } from '../../../server/api-config';
+import type { CheckConfig } from '../../../server/types';
 import { api } from '../../api';
 import { formFromProject, METRIC_IDS, projectSame, projectToBody, type ProjectFormState, type Tri } from '../../settings-form';
 import { CopyButton } from './CopyButton';
@@ -13,7 +14,7 @@ const SECRET_LABEL: Record<string, string> = {
   revenuecat: 'RevenueCat', posthog: 'PostHog', 'asc-key-id': 'ASC: key id', 'asc-issuer': 'ASC: issuer', 'asc-p8': 'ASC: clave .p8',
 };
 const FIELD_LABEL: Record<string, string> = {
-  baseBranch: 'Rama base', github: 'GitHub', backlogFile: 'Archivo de backlog', contextWindow: 'Ventana de contexto', metrics: 'Métricas',
+  baseBranch: 'Rama base', maxConcurrentRuns: 'Agentes a la vez', github: 'GitHub', backlogFile: 'Archivo de backlog', contextWindow: 'Ventana de contexto', metrics: 'Métricas',
 };
 const ORIGIN_TEXT = { config: 'De faro.config.ts', editada: 'De faro.config.ts, editada en el panel', panel: 'Del panel' } as const;
 
@@ -82,27 +83,40 @@ export function ProjectForm({ full, project, onDirty, onSaved }: Props) {
         {reason && <p className="notice" role="note">{reason}</p>}
         <fieldset className="rform-body" disabled={readonly}>
           <div className="r2">
-            <label>Rama base
-              <input value={f.baseBranch} onChange={(e) => set('baseBranch', e.target.value)} required spellCheck={false} />
-            </label>
+            {!project.multiRepo && (
+              <label>Rama base
+                <input value={f.baseBranch} onChange={(e) => set('baseBranch', e.target.value)} required spellCheck={false} />
+              </label>
+            )}
             <label>Ventana de contexto (tokens)
               <input inputMode="numeric" value={f.contextWindow} onChange={(e) => set('contextWindow', e.target.value)} placeholder="200000" />
             </label>
           </div>
-          <label>Archivo de backlog
-            <input value={f.backlogFile} onChange={(e) => set('backlogFile', e.target.value)} placeholder="Sin backlog" spellCheck={false} />
-          </label>
+          <div className="r2">
+            <label>Archivo de backlog
+              <input value={f.backlogFile} onChange={(e) => set('backlogFile', e.target.value)} placeholder="Sin backlog" spellCheck={false} />
+            </label>
+            <label>Agentes a la vez
+              <input inputMode="numeric" value={f.maxConcurrent} onChange={(e) => set('maxConcurrent', e.target.value)} placeholder="2" />
+            </label>
+          </div>
 
           <h3 className="fgroup">GitHub</h3>
-          <Tri3 label="Vigilar el CI" value={f.ci} onChange={(v) => set('ci', v)} />
-          <Tri3 label="Integrar cada tarea por PR" value={f.prs} onChange={(v) => set('prs', v)} />
-          <label>Perfil que arregla el CI
-            <select value={f.ciProfile} onChange={(e) => set('ciProfile', e.target.value)}>
-              <option value="">El primero con nivel 2 o más</option>
-              {f.ciProfile && !full.profiles.some((p) => p.id === f.ciProfile) && <option value={f.ciProfile}>{f.ciProfile}</option>}
-              {full.profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
+          {project.multiRepo ? (
+            <p className="hint muted">Con varios repos Faro no vigila el CI ni integra por PR: integra en local y sube la rama base de cada repo.</p>
+          ) : (
+            <>
+              <Tri3 label="Vigilar el CI" value={f.ci} onChange={(v) => set('ci', v)} />
+              <Tri3 label="Integrar cada tarea por PR" value={f.prs} onChange={(v) => set('prs', v)} />
+              <label>Perfil que arregla el CI
+                <select value={f.ciProfile} onChange={(e) => set('ciProfile', e.target.value)}>
+                  <option value="">El primero con nivel 2 o más</option>
+                  {f.ciProfile && !full.profiles.some((p) => p.id === f.ciProfile) && <option value={f.ciProfile}>{f.ciProfile}</option>}
+                  {full.profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </label>
+            </>
+          )}
 
           <h3 className="fgroup">Métricas</h3>
           <p className="hint muted">Solo identificadores, no secretos. Si dejas todo vacío, el proyecto no tiene métricas.</p>
@@ -152,16 +166,9 @@ export function ProjectForm({ full, project, onDirty, onSaved }: Props) {
         <h3 className="fgroup">Solo lectura</h3>
         <p className="notice">Se edita en <code>faro.config.ts</code>.</p>
         <dl>
-          <dt>Repositorio</dt><dd><code>{ro.repoPath}</code></dd>
-          <dt>Worktrees</dt><dd><code>{ro.worktreesDir}</code></dd>
-          <dt>Comprobaciones</dt>
-          <dd>{ro.checks.length ? ro.checks.map((c) => (
-            <div key={c.name}><strong>{c.name}</strong>: <code>{c.command}</code>{c.whenChanged && <span className="muted"> · si cambia {c.whenChanged}</span>}</div>
-          )) : <span className="muted">Ninguna</span>}</dd>
-          <dt>Preparación</dt>
-          <dd>{ro.prepare.length ? ro.prepare.map((c) => <div key={c}><code>{c}</code></div>) : <span className="muted">Ninguna</span>}</dd>
-          <dt>Excluidos</dt>
-          <dd>{ro.exclude.length ? ro.exclude.map((c) => <div key={c}><code>{c}</code></div>) : <span className="muted">Ninguno</span>}</dd>
+          {project.multiRepo
+            ? <><dt>Worktrees</dt><dd><code>{ro.worktreesDir}</code></dd></>
+            : <RepoRows repoPath={ro.repoPath} worktreesDir={ro.worktreesDir} checks={ro.checks} prepare={ro.prepare} exclude={ro.exclude} />}
           <dt>Release</dt>
           <dd>{ro.release ? (
             <>
@@ -176,7 +183,34 @@ export function ProjectForm({ full, project, onDirty, onSaved }: Props) {
             <div key={s.id}><strong>{s.id}</strong> · {s.country} · <code>{s.fichaFile}</code></div>
           )) : <span className="muted">Ninguna</span>}</dd>
         </dl>
+        {project.multiRepo && ro.repos.map((r) => (
+          <div key={r.id}>
+            <h4 className="fgroup">{r.name}</h4>
+            <dl><RepoRows repoPath={r.path} baseBranch={`${r.remote}/${r.baseBranch}`} checks={r.checks} prepare={r.prepare} exclude={r.exclude} /></dl>
+          </div>
+        ))}
       </section>
     </div>
+  );
+}
+
+/** Filas de un repo: ruta, (worktrees o rama base), comprobaciones, preparación y excluidos. */
+function RepoRows({ repoPath, worktreesDir, baseBranch, checks, prepare, exclude }: {
+  repoPath: string; worktreesDir?: string; baseBranch?: string; checks: CheckConfig[]; prepare: string[]; exclude: string[];
+}) {
+  return (
+    <>
+      <dt>Repositorio</dt><dd><code>{repoPath}</code></dd>
+      {worktreesDir && <><dt>Worktrees</dt><dd><code>{worktreesDir}</code></dd></>}
+      {baseBranch && <><dt>Rama base</dt><dd><code>{baseBranch}</code></dd></>}
+      <dt>Comprobaciones</dt>
+      <dd>{checks.length ? checks.map((c) => (
+        <div key={c.name}><strong>{c.name}</strong>: <code>{c.command}</code>{c.whenChanged && <span className="muted"> · si cambia {c.whenChanged}</span>}</div>
+      )) : <span className="muted">Ninguna</span>}</dd>
+      <dt>Preparación</dt>
+      <dd>{prepare.length ? prepare.map((c) => <div key={c}><code>{c}</code></div>) : <span className="muted">Ninguna</span>}</dd>
+      <dt>Excluidos</dt>
+      <dd>{exclude.length ? exclude.map((c) => <div key={c}><code>{c}</code></div>) : <span className="muted">Ninguno</span>}</dd>
+    </>
   );
 }

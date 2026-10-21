@@ -5,7 +5,9 @@ import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NotFoundError, Store } from '../src/server/store';
 import { InvalidTransitionError } from '../src/server/taskState';
+import { getProject } from '../src/server/config';
 import type { ProjectConfig } from '../src/server/types';
+import { makeConfig, makeMultiConfig, makeRepo } from './helpers';
 
 const project: ProjectConfig = {
   id: 'demo', name: 'Demo', prefix: 'DEM', repoPath: '/tmp/x', baseBranch: 'main', remote: 'origin',
@@ -337,6 +339,39 @@ describe('estadísticas y gasto', () => {
     expect(store.spend(new Date('2026-10-17T12:00:00'))).toEqual({ today: 1, week: 3 });
   });
 
+  describe('gasto por proyecto', () => {
+    const other: ProjectConfig = { ...project, id: 'otro', prefix: 'OTR' };
+    const setup = () => {
+      const a = newTask();
+      const b = store.createTask(other, { title: 'B', description: '', profileId: 'dev', level: 2 });
+      fin(a.id, { costUsd: 1 });
+      fin(b.id, { costUsd: 10 });
+      store.recordAssistantCall(0.5, true, 'demo');
+      store.recordAssistantCall(5, true, 'otro');
+      store.recordAssistantCall(100, true); // fila vieja, sin proyecto
+    };
+
+    it('spend por proyecto suma solo sus ejecuciones y llamadas del asistente', () => {
+      setup();
+      const from = new Date(Date.now() - 86400000).toISOString();
+      expect(store.spend(new Date(), 'demo')).toEqual({ today: 1.5, week: 1.5 });
+      expect(store.spend(new Date(), 'otro')).toEqual({ today: 15, week: 15 });
+      expect(store.spendByDay(from, 'demo').reduce((n, r) => n + r.usd, 0)).toBe(1.5);
+      expect(store.spendBy('profile', from, 'demo')).toEqual([{ key: 'ios', usd: 1, runs: 1 }, { key: 'Asistente', usd: 0.5, runs: 1 }]);
+      expect(store.runCount(from, 'otro')).toBe(1);
+      expect(store.assistantCallsSince(from, 'demo')).toBe(1);
+      expect(store.assistantCallsSince(from, 'nada')).toBe(0);
+    });
+
+    it('sin proyecto, el total no cambia (incluye las filas viejas sin proyecto)', () => {
+      setup();
+      const from = new Date(Date.now() - 86400000).toISOString();
+      expect(store.spend(new Date())).toEqual({ today: 116.5, week: 116.5 });
+      expect(store.runCount(from)).toBe(2);
+      expect(store.assistantCallsSince(from)).toBe(3);
+    });
+  });
+
   it('migra una tabla runs antigua sin perder filas', () => {
     const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'faro-db-')), 'faro.db');
     const old = new Database(file);
@@ -380,5 +415,32 @@ describe('descargas por día y país', () => {
     store.upsertDailyDownloads('demo', '2026-10-05', []);
     expect(store.downloadDays('demo', '2026-10-01').has('2026-10-05')).toBe(true);
     expect(store.dailyDownloads('demo', '2026-10-05', '2026-10-05')).toEqual([{ day: '2026-10-05', country: '', units: 0 }]);
+  });
+});
+
+describe('repos de la tarea', () => {
+  it('createTask guarda repos en multi-repo y null en un repo', () => {
+    const multi = getProject(makeMultiConfig(), 'multi');
+    const mk = (p: ProjectConfig, repos?: string[]) => store.createTask(p, { title: 't', description: '', profileId: 'dev', level: 2, repos });
+    expect(mk(multi, ['b']).repos).toEqual(['b']);
+    expect(store.getTask('MUL-1').repos).toEqual(['b']);
+    expect(mk(multi).repos).toBeNull();
+    expect(() => mk(multi, ['zzz'])).toThrow(/repo desconocido zzz/);
+    expect(mk(getProject(makeConfig(makeRepo()), 'demo'), ['main']).repos).toBeNull();
+    expect(newTask().repos).toBeNull();
+  });
+
+  it('una fila antigua sin columna repos se lee como null', () => {
+    const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'faro-db-')), 'faro.db');
+    const old = new Database(file);
+    old.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+      profile_id TEXT NOT NULL, state TEXT NOT NULL, level INTEGER NOT NULL, parent_id TEXT, routine_id TEXT,
+      branch TEXT, worktree_path TEXT, session_id TEXT, next_prompt TEXT, blocked_reason TEXT, summary TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    old.prepare(`INSERT INTO tasks (id, project_id, title, description, profile_id, state, level, created_at, updated_at)
+      VALUES ('DEM-1', 'demo', 't', '', 'dev', 'draft', 2, 'x', 'x')`).run();
+    old.close();
+    expect(new Store(file).getTask('DEM-1').repos).toBeNull();
   });
 });

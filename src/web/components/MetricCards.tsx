@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Card } from '../../server/metrics/summary';
 import { formatValue } from '../../shared/format';
 import { api, type MetricsView } from '../api';
+import { useCurrentProject } from '../project';
 
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
@@ -22,26 +23,20 @@ export function MetricCard({ c }: { c: Card }) {
 }
 
 export function useMetrics(): { view: MetricsView | null; project: string | null; loading: boolean; error: string | null; reload: () => void } {
-  const [project, setProject] = useState<string | null>(null);
-  const [configLoaded, setConfigLoaded] = useState(false);
+  // Solo el proyecto actual, y solo si tiene métricas.
+  const cur = useCurrentProject();
+  const project = cur?.metrics ? cur.id : null;
   const [view, setView] = useState<MetricsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    let ignore = false;
-    setError(null);
-    api.config()
-      .then((c) => { if (!ignore) { setProject(c.projects.find((p) => p.metrics)?.id ?? null); setConfigLoaded(true); } })
-      .catch((e: Error) => { if (!ignore) setError(e.message); });
-    return () => { ignore = true; };
-  }, [tick]);
-  useEffect(() => {
     if (!project) return;
     let ignore = false;
+    setError(null);
     api.metrics(project).then((v) => { if (!ignore) { setView(v); setError(null); } }).catch((e: Error) => { if (!ignore) setError(e.message); });
     return () => { ignore = true; };
   }, [project, tick]);
-  const loading = !error && (!configLoaded || (project !== null && view === null));
+  const loading = !error && project !== null && view === null;
   return { view, project, loading, error, reload: () => setTick((t) => t + 1) };
 }
 

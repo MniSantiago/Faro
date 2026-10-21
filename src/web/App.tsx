@@ -20,6 +20,7 @@ import { NewTask } from './pages/NewTask';
 import { Routines } from './pages/Routines';
 import { Plan } from './pages/Plan';
 import { TaskPage } from './pages/TaskPage';
+import { retryConfig, useProjectState } from './project';
 
 /** Cifra de `#/inicio/<cifra>`, o null si la ruta no es un detalle conocido (entonces se pinta la home). */
 const detailMetric = (route: string): HomeMetric | null => {
@@ -52,11 +53,14 @@ export function App() {
 
 function Shell() {
   const route = useRoute();
+  // Sin la query del hash (`?p=`, `?titulo=`…): es lo que decide la página.
+  const path = route.split('?')[0];
+  const { config, projectId, error } = useProjectState();
   const [queue, setQueue] = useState<QueueState | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
 
   // Al cambiar de página, arriba del todo (si no, se conserva el desplazamiento de la anterior).
-  useEffect(() => { window.scrollTo(0, 0); }, [route]);
+  useEffect(() => { window.scrollTo(0, 0); }, [path]);
 
   useEffect(() => {
     const refresh = () => { api.queue().then(setQueue).catch(() => {}); };
@@ -65,23 +69,27 @@ function Shell() {
 
   return (
     <div className="app">
-      <Nav route={route} />
+      <Nav route={path} />
       <div className="main-col">
         {queue?.paused && <QueueBanner queue={queue} error={resumeError} onResume={() => { setResumeError(null); api.resumeQueue().then(setQueue).catch((e: Error) => setResumeError(e.message)); }} />}
-        <main className="content">
-          {route.startsWith('/tarea/') ? <TaskPage key={route.slice('/tarea/'.length)} id={route.slice('/tarea/'.length)} />
-            : route.split('?')[0] === '/nueva' ? <NewTask />
-            : route === '/rutinas' ? <Routines />
-            : route === '/plan' ? <Plan />
-            : route === '/metricas' ? <Metrics />
-            : route === '/aso' ? <Aso />
-            : route === '/dispositivos' ? <Devices />
-            : route === '/chat/nuevo' ? <NewChat />
-            : route === '/chats' ? <Chats />
-            : route === '/historial' ? <History />
-            : route === '/bandeja' ? <Inbox />
-            : route === '/config' || route.startsWith('/config/') ? <Config route={route} />
-            : detailMetric(route) ? <HomeDetail key={route} metric={detailMetric(route)!} />
+        {/* Al cambiar de proyecto la página se monta de nuevo: vuelve a pedir sus datos, ya del proyecto nuevo. */}
+        <main className="content" key={projectId ?? ''}>
+          {!config ? (error
+            ? <p className="error" role="alert">{error} <button className="btn" onClick={retryConfig}>Reintentar</button></p>
+            : <p className="muted">Cargando…</p>)
+            : path.startsWith('/tarea/') ? <TaskPage key={path.slice('/tarea/'.length)} id={path.slice('/tarea/'.length)} />
+            : path === '/nueva' ? <NewTask />
+            : path === '/rutinas' ? <Routines />
+            : path === '/plan' ? <Plan />
+            : path === '/metricas' ? <Metrics />
+            : path === '/aso' ? <Aso />
+            : path === '/dispositivos' ? <Devices />
+            : path === '/chat/nuevo' ? <NewChat />
+            : path === '/chats' ? <Chats />
+            : path === '/historial' ? <History />
+            : path === '/bandeja' ? <Inbox />
+            : path === '/config' || path.startsWith('/config/') ? <Config route={path} />
+            : detailMetric(path) ? <HomeDetail key={path} metric={detailMetric(path)!} />
             : <Home />}
         </main>
       </div>

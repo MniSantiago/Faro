@@ -5,10 +5,13 @@ import { PushBanner } from '../components/PushBanner';
 import { TaskTree } from '../components/TaskCard';
 import { formatUsd } from '../format';
 import { inboxSections, taskTree } from '../inbox';
+import { useProject } from '../project';
 
 const ACTIVE = new Set<Task['state']>(['working', 'queued']);
 
 export function Inbox() {
+  const { projectId } = useProject();
+  const project = projectId ?? undefined;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [stats, setStats] = useState<Record<string, TaskStats>>({});
   const [spend, setSpend] = useState<Spend | null>(null);
@@ -21,13 +24,13 @@ export function Inbox() {
     let ignore = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const loadStats = () => {
-      api.stats().then((s) => { if (!ignore) { setStats(s.tasks); setSpend(s.spend); } }).catch(() => {});
-      api.pushState().then((p) => { if (!ignore) setPushes(p.projects); }).catch(() => {});
+      api.stats(project).then((s) => { if (!ignore) { setStats(s.tasks); setSpend(s.spend); } }).catch(() => {});
+      api.pushState(project).then((p) => { if (!ignore) setPushes(p.projects); }).catch(() => {});
     };
     // Al terminar una ejecución cambia el gasto: se vuelve a pedir, agrupando avisos seguidos.
     const loadStatsSoon = () => { clearTimeout(timer); timer = setTimeout(loadStats, 1000); };
     const refresh = () => {
-      api.tasks().then((list) => {
+      api.tasks(project).then((list) => {
         if (ignore) return;
         setError(null);
         for (const t of list) states.current.set(t.id, t.state);
@@ -37,6 +40,7 @@ export function Inbox() {
     };
     const off = subscribe((m) => {
       if (m.type === 'task') {
+        if (project && m.task.projectId !== project) return;
         const before = states.current.get(m.task.id);
         states.current.set(m.task.id, m.task.state);
         if (before !== m.task.state && !ACTIVE.has(m.task.state)) loadStatsSoon();
@@ -49,7 +53,7 @@ export function Inbox() {
     // Para que «● 6 min» avance sin esperar a un aviso del servidor.
     const tick = setInterval(() => setNow(new Date()), 30000);
     return () => { ignore = true; off(); clearTimeout(timer); clearInterval(tick); };
-  }, []);
+  }, [project]);
 
   if (error) return <p className="error" role="alert">{error}</p>;
 

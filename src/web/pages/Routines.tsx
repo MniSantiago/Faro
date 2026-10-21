@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, STATE_LABEL, subscribe, type RoutineView } from '../api';
 import { describeCron } from '../cron';
+import { useProject } from '../project';
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 
 export function Routines() {
+  const { projectId } = useProject();
+  const project = projectId ?? undefined;
   const [list, setList] = useState<RoutineView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(() => { api.routines().then(setList).catch((e: Error) => setError(e.message)); }, []);
-  useEffect(() => subscribe((m) => { if (m.type === 'task' && m.task.routineId) load(); }, load), [load]);
+  const load = useCallback(() => { api.routines(project).then(setList).catch((e: Error) => setError(e.message)); }, [project]);
+  useEffect(() => subscribe((m) => { if (m.type === 'task' && m.task.routineId && (!project || m.task.projectId === project)) load(); }, load), [load, project]);
   useEffect(load, [load]);
 
   const act = async (id: string, fn: () => Promise<unknown>) => {

@@ -3,7 +3,7 @@ import type { ConfigFull } from '../../../server/api-config';
 import { api } from '../../api';
 import { formFromGeneral, generalSame, generalToBody, type GeneralFormState, type Tri } from '../../settings-form';
 
-const FIELD_LABEL: Record<string, string> = { title: 'Título', maxConcurrentRuns: 'Ejecuciones simultáneas', coordinatorProfile: 'Perfil del coordinador', retryWatchdog: 'Reintentos' };
+const FIELD_LABEL: Record<string, string> = { title: 'Título', maxConcurrentRuns: 'Límite global de agentes', coordinatorProfile: 'Perfil del coordinador', retryWatchdog: 'Reintentos' };
 const ORIGIN_TEXT = { config: 'De faro.config.ts', editada: 'De faro.config.ts, editada en el panel', panel: 'Del panel' } as const;
 const TRI: [Tri, string][] = [['default', 'Por defecto (activada)'], ['on', 'Activada'], ['off', 'Desactivada']];
 
@@ -57,8 +57,8 @@ export function GeneralForm({ full, onDirty, onSaved }: Props) {
             <input value={f.title} onChange={(e) => set('title', e.target.value)} maxLength={80} placeholder="Faro" />
           </label>
           <div className="r2">
-            <label>Ejecuciones simultáneas
-              <input inputMode="numeric" value={f.maxConcurrent} onChange={(e) => set('maxConcurrent', e.target.value)} required />
+            <label>Límite global de agentes
+              <input inputMode="numeric" value={f.maxConcurrent} onChange={(e) => set('maxConcurrent', e.target.value)} placeholder="Sin límite" />
             </label>
             <label>Perfil del coordinador
               <select value={f.coordinatorProfile} onChange={(e) => set('coordinatorProfile', e.target.value)}>

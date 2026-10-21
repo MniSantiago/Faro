@@ -5,6 +5,7 @@ const Subtask = z.object({
   description: z.string().default(''),
   profileId: z.string().min(1),
   level: z.number().int().min(1).max(4),
+  repos: z.array(z.string().min(1)).optional(),
 });
 
 const QuestionSchema = z.object({

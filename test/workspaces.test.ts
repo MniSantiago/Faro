@@ -215,12 +215,73 @@ describe('GitWorkspaces', () => {
     expect(gitSync(bare, 'show', 'main:hola.txt')).toBe('hola\n');
   });
 
+  /** Origin desnudo con main ya subida, repo en otra rama (sin checkout de main) y un commit ajeno en el remoto. */
+  async function remotoAdelantado(contenidoAjeno: { file: string; text: string }) {
+    const { repo, project } = setup();
+    const bare = tmpDir('faro-remote-');
+    gitSync(bare, 'init', '-q', '--bare', '-b', 'main');
+    gitSync(repo, 'remote', 'add', 'origin', bare);
+    gitSync(repo, 'push', '-q', 'origin', 'main');
+    const otro = tmpDir('faro-otro-');
+    gitSync(otro, 'clone', '-q', bare, '.');
+    writeFileSync(path.join(otro, contenidoAjeno.file), contenidoAjeno.text);
+    gitSync(otro, 'add', '.');
+    gitSync(otro, 'commit', '-qm', 'ajeno');
+    gitSync(otro, 'push', '-q', 'origin', 'main');
+    const task = await withWork(project);
+    gitSync(repo, 'switch', '-qc', 'otra');
+    expect(await ws.merge(project, task)).toEqual({ ok: true });
+    return { repo, project, bare };
+  }
+
+  it('push sin checkout de main fusiona lo nuevo del remoto y sube', async () => {
+    const { repo, project, bare } = await remotoAdelantado({ file: 'ajeno.txt', text: 'ajeno\n' });
+    await ws.push(project);
+    expect(gitSync(bare, 'show', 'main:hola.txt')).toBe('hola\n');
+    expect(gitSync(bare, 'show', 'main:ajeno.txt')).toBe('ajeno\n');
+    expect(gitSync(repo, 'rev-parse', 'main')).toBe(gitSync(bare, 'rev-parse', 'main'));
+    expect(gitSync(repo, 'branch', '--show-current').trim()).toBe('otra');
+    expect(gitSync(repo, 'worktree', 'list', '--porcelain')).not.toContain('_push-');
+    expect(existsSync(path.join(project.worktreesDir, `_push-main-${process.pid}`))).toBe(false);
+  });
+
+  it('push sin checkout con choque lanza y no deja nada a medias', async () => {
+    const { repo, project, bare } = await remotoAdelantado({ file: 'hola.txt', text: 'otra cosa\n' });
+    const antes = gitSync(repo, 'rev-parse', 'main');
+    const remotoAntes = gitSync(bare, 'rev-parse', 'main');
+    await expect(ws.push(project)).rejects.toThrow(/choca con/);
+    expect(gitSync(repo, 'rev-parse', 'main')).toBe(antes);
+    expect(gitSync(bare, 'rev-parse', 'main')).toBe(remotoAntes);
+    expect(gitSync(repo, 'worktree', 'list', '--porcelain')).not.toContain('_push-');
+    expect(existsSync(path.join(project.worktreesDir, `_push-main-${process.pid}`))).toBe(false);
+  });
+
   it('discard borra el worktree y archiva la rama', async () => {
     const { repo, project } = setup();
     const task = await withWork(project);
     await ws.discard(project, task);
     expect(existsSync(task.worktreePath!)).toBe(false);
     expect(gitSync(repo, 'branch', '--list', 'archive/*')).toContain(`archive/${task.branch}`);
+  });
+
+  it('create con ruta deja el worktree justo ahí', async () => {
+    const { project } = setup();
+    const at = path.join(project.worktreesDir, 'DEM-1-carpeta', 'main');
+    const wt = await ws.create(project, makeTask({ id: 'DEM-1', title: 'Carpeta' }), at);
+    expect(wt).toEqual({ path: at, branch: 'DEM-1-carpeta' });
+    expect(existsSync(path.join(at, 'README.md'))).toBe(true);
+  });
+
+  it('diff con prefijo antepone el prefijo a archivos y patch', async () => {
+    const { project } = setup();
+    const task = await withWork(project);
+    const plain = await ws.diff(project, task);
+    expect(plain.files).toEqual(['hola.txt']);
+    expect(plain.patch).toContain('b/hola.txt');
+    const d = await ws.diff(project, task, { prefix: 'web/' });
+    expect(d.files).toEqual(['web/hola.txt']);
+    expect(d.patch).toContain('a/web/hola.txt');
+    expect(d.patch).toContain('b/web/hola.txt');
   });
 
   it('cleanup borra el worktree y conserva la rama', async () => {

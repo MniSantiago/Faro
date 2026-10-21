@@ -4,13 +4,15 @@ import type { ApiDeps } from './api';
 import { canChange, editableBy, type Access, type Actor, type Change } from './config-access';
 import { draftRoutine } from './assistant';
 import { AssistantError, BadRequestError, ForbiddenError } from './errors';
-import { addSecretCommand, secretExists, type SecretName } from './keychain';
+import { projectSecretCommand, projectSecretExists, type SecretName } from './keychain';
 import type { IgnoredOverride, LiveConfig, Origin, OverrideKind } from './overrides';
 import { nextRun } from './scheduler';
 import { NotFoundError } from './store';
 import { EFFORTS, type CheckConfig, type FaroConfig, type ProfileConfig, type ProjectConfig, type ReleaseConfig, type RetryWatchdogConfig, type RoutineConfig } from './types';
 import type { AsoStoreConfig } from './aso/types';
 import type { MetricsConfig } from './metrics/types';
+import { releaseRepo } from './task-repos';
+import { isMultiRepo } from './config';
 import { slugify } from './workspaces';
 
 type Obj = Record<string, unknown>;
@@ -68,6 +70,7 @@ const ProjectPatch = z.object({
   github: z.object({ ci: z.boolean().nullable(), prs: z.boolean().nullable(), ciProfile: text.nullable() }).partial().strict().nullable(),
   backlogFile: text.nullable(),
   contextWindow: z.number().int().positive().nullable(),
+  maxConcurrentRuns: z.number().int().min(1).nullable(),
   metrics: z.object({
     revenuecatProjectId: metricId, posthogHost: metricId, posthogProjectId: metricId, ascAppId: metricId, ascVendorNumber: metricId,
     posthogFunnel: FunnelBody.nullable(),
@@ -84,7 +87,7 @@ export type ProjectUpdateBody = z.input<typeof ProjectPatch>;
 const wait = z.number().int().min(0).nullable();
 const GeneralPatch = z.object({
   title: text.max(80).nullable(),
-  maxConcurrentRuns: z.number().int().min(1),
+  maxConcurrentRuns: z.number().int().min(1).nullable(),
   coordinatorProfile: text.nullable(),
   retryWatchdog: z.object({ enabled: z.boolean().nullable(), maxWaitMs: wait, maxUsageLimitWaitMs: wait }).partial().strict().nullable(),
 }).partial().strict();
@@ -94,19 +97,25 @@ export type GeneralUpdateBody = z.input<typeof GeneralPatch>;
 interface ElementMeta { origin: Origin; overridden: string[]; editable: Access }
 export type ConfigRoutineView = RoutineConfig & ElementMeta & { projectId: string; nextRunAt: string | null };
 export type ConfigProfileView = ProfileConfig & ElementMeta & { usedBy: string[] };
+export interface ConfigRepoView {
+  id: string; name: string; path: string; baseBranch: string; remote: string; checks: CheckConfig[]; prepare: string[]; exclude: string[];
+}
 export interface ConfigProjectView extends ElementMeta {
   id: string; name: string; baseBranch: string;
-  github: ProjectConfig['github'] | null; backlogFile: string | null; contextWindow: number | null; metrics: MetricsConfig | null;
+  /** Con varios repos la rama base de cada uno (y lo de GitHub) solo se ven: se cambian en faro.config.ts. */
+  multiRepo: boolean;
+  github: ProjectConfig['github'] | null; backlogFile: string | null; contextWindow: number | null; maxConcurrentRuns: number | null; metrics: MetricsConfig | null;
   readonly: {
     checks: CheckConfig[]; prepare: string[]; exclude: string[]; release: ReleaseConfig | null;
     asoStores: AsoStoreConfig[]; repoPath: string; worktreesDir: string;
+    repos: ConfigRepoView[];
   };
   /** Conectado o falta (sin leer el valor), y el comando para añadirlo. Vacíos si el proyecto no tiene `metrics`. */
   secrets: Record<string, boolean>;
   secretCommands: Record<string, string>;
 }
 export interface ConfigGeneralView extends ElementMeta {
-  title: string; maxConcurrentRuns: number; coordinatorProfile: string; retryWatchdog: RetryWatchdogConfig | null;
+  title: string; maxConcurrentRuns: number | null; coordinatorProfile: string; retryWatchdog: RetryWatchdogConfig | null;
   readonly: { host: string; port: number; dataDir: string; allowedHosts: string[]; claudeVersion: string | null };
 }
 export type RoutineContext = NonNullable<RoutineConfig['context']>;
@@ -126,7 +135,7 @@ export interface ConfigFull {
 const ROUTINE_KEYS = ['name', 'cron', 'profileId', 'level', 'title', 'prompt', 'draft', 'release', 'context', 'maxBudgetUsd'] as const;
 const PROFILE_KEYS = ['name', 'instructions', 'model', 'effort', 'maxBudgetUsd', 'defaultLevel', 'timeoutMinutes', 'mcpConfig'] as const;
 /** Lo editable de Proyecto y Generales: también se manda entero, por la misma razón. */
-const PROJECT_KEYS = ['baseBranch', 'github', 'backlogFile', 'contextWindow', 'metrics'] as const;
+const PROJECT_KEYS = ['baseBranch', 'github', 'backlogFile', 'contextWindow', 'maxConcurrentRuns', 'metrics'] as const;
 const GENERAL_KEYS = ['title', 'maxConcurrentRuns', 'coordinatorProfile', 'retryWatchdog'] as const;
 const SECRETS_TTL_MS = 60_000;
 const METRICS_SECRETS: SecretName[] = ['revenuecat', 'posthog', 'asc-key-id', 'asc-issuer', 'asc-p8'];
@@ -174,16 +183,16 @@ function newId(name: string, taken: Set<string>): string {
 export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: LiveConfig }): void {
   const { live, bus } = d;
   const config = live.config;
-  const exists = d.secretExists ?? secretExists;
+  const exists = d.secretExists ?? projectSecretExists;
   // Estado de los secretos (sin leer su valor), cacheado un minuto: el panel lo pide a menudo.
-  let secretsCache: { at: number; value: Promise<Record<string, boolean>> } | null = null;
-  const secretsStatus = (): Promise<Record<string, boolean>> => {
-    if (!secretsCache || Date.now() - secretsCache.at > SECRETS_TTL_MS) {
-      const value = Promise.all(METRICS_SECRETS.map(async (n) => [n, await exists(n).catch(() => false)] as const))
-        .then((pairs) => Object.fromEntries(pairs));
-      secretsCache = { at: Date.now(), value };
-    }
-    return secretsCache.value;
+  const secretsCache = new Map<string, { at: number; value: Promise<Record<string, boolean>> }>();
+  const secretsStatus = (projectId: string): Promise<Record<string, boolean>> => {
+    const hit = secretsCache.get(projectId);
+    if (hit && Date.now() - hit.at <= SECRETS_TTL_MS) return hit.value;
+    const value = Promise.all(METRICS_SECRETS.map(async (n) => [n, await exists(n, projectId).catch(() => false)] as const))
+      .then((pairs) => Object.fromEntries(pairs));
+    secretsCache.set(projectId, { at: Date.now(), value });
+    return value;
   };
   const claudeVersion = () => d.claudeVersion?.() ?? null;
 
@@ -217,24 +226,30 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
     id: p.id,
     name: p.name,
     baseBranch: p.baseBranch,
+    multiRepo: isMultiRepo(p),
     github: p.github ?? null,
     backlogFile: p.backlogFile ?? null,
     contextWindow: p.contextWindow ?? null,
+    maxConcurrentRuns: p.maxConcurrentRuns ?? null,
     metrics: p.metrics ?? null,
     // Se ven, pero se editan en faro.config.ts.
     readonly: {
-      checks: p.checks ?? [], prepare: p.prepare ?? [], exclude: p.exclude ?? [], release: p.release ?? null,
+      checks: p.checks ?? [], prepare: p.prepare ?? [], exclude: p.exclude ?? [], release: releaseRepo(p)?.release ?? null,
       asoStores: p.aso?.stores ?? [], repoPath: p.repoPath, worktreesDir: p.worktreesDir,
+      repos: p.repos!.map((r) => ({
+        id: r.id, name: r.name ?? r.id, path: r.path, baseBranch: r.baseBranch, remote: r.remote,
+        checks: r.checks ?? [], prepare: r.prepare ?? [], exclude: r.exclude ?? [],
+      })),
     },
     secrets: p.metrics ? secrets : {},
-    secretCommands: p.metrics ? Object.fromEntries(METRICS_SECRETS.map((n) => [n, addSecretCommand(n)])) : {},
+    secretCommands: p.metrics ? Object.fromEntries(METRICS_SECRETS.map((n) => [n, projectSecretCommand(n, p.id, config.projects.length)])) : {},
     origin: live.origin('project', p.id),
     overridden: live.overriddenFields('project', p.id),
     editable: editableBy(actor(req), 'project', p.id, config),
   });
   const generalView = (req: FastifyRequest): ConfigGeneralView => ({
     title: config.title ?? 'Faro',
-    maxConcurrentRuns: config.maxConcurrentRuns,
+    maxConcurrentRuns: config.maxConcurrentRuns ?? null,
     coordinatorProfile: config.coordinatorProfile ?? 'coordinador',
     retryWatchdog: config.retryWatchdog ?? null,
     readonly: { host: config.host, port: config.port, dataDir: config.dataDir, allowedHosts: config.allowedHosts ?? [], claudeVersion: claudeVersion() },
@@ -262,11 +277,11 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
   const id = (req: FastifyRequest) => (req.params as { id: string }).id;
 
   app.get('/api/config/full', async (req): Promise<ConfigFull> => {
-    const secrets = await secretsStatus();
     const now = new Date();
+    const statuses = await Promise.all(config.projects.map((p) => (p.metrics ? secretsStatus(p.id) : Promise.resolve({}))));
     return {
       general: generalView(req),
-      projects: config.projects.map((p) => projectView(req, p, secrets)),
+      projects: config.projects.map((p, i) => projectView(req, p, statuses[i])),
       profiles: config.profiles.map((p) => profileView(req, p)),
       routines: config.projects.flatMap((p) => (p.routines ?? []).map((r) => routineView(req, p.id, r, now))),
       ignored: live.ignored(),
@@ -378,6 +393,9 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
   app.patch('/api/config/projects/:id', async (req) => {
     const p = projectOrThrow(id(req));
     const b = ProjectPatch.parse(req.body);
+    if (isMultiRepo(p) && b.baseBranch !== undefined && b.baseBranch !== p.baseBranch) {
+      throw new BadRequestError(`${p.name} tiene varios repos: la rama base de cada uno se cambia en faro.config.ts`);
+    }
     const value: Obj = { ...b };
     if (b.github !== undefined) value.github = mergedNested(p.github, b.github);
     if (b.metrics !== undefined) value.metrics = mergedNested(p.metrics, b.metrics);
@@ -386,7 +404,7 @@ export function registerConfigRoutes(app: FastifyInstance, d: ApiDeps & { live: 
     check(req, { kind: 'project', id: p.id, before, after });
     live.save('project', p.id, allKeys(after, PROJECT_KEYS), by(req));
     changed();
-    return projectView(req, projectOrThrow(p.id), await secretsStatus());
+    return projectView(req, projectOrThrow(p.id), await secretsStatus(p.id));
   });
   app.patch('/api/config/general', async (req) => {
     const b = GeneralPatch.parse(req.body);

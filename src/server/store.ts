@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { assertTransition } from './taskState';
 import { AsoRepo } from './aso/repo';
+import { taskRepoIds } from './task-repos';
 import type { Snapshot, SourceId } from './metrics/types';
 import type { OverrideKind, OverrideRow } from './overrides';
 import type {
@@ -19,7 +20,7 @@ export class NotFoundError extends Error {}
 
 export type TaskPatch = Partial<Pick<Task,
   'title' | 'description' | 'level' | 'branch' | 'worktreePath' | 'sessionId' | 'sessionStarted' | 'nextPrompt' |
-  'blockedReason' | 'summary' | 'attempts' | 'questions' | 'release'>>;
+  'blockedReason' | 'summary' | 'attempts' | 'questions' | 'release' | 'repos'>>;
 
 export interface NewTaskInput {
   title: string;
@@ -30,6 +31,8 @@ export interface NewTaskInput {
   routineId?: string | null;
   kind?: TaskKind;
   release?: Release;
+  /** Ids de repos (solo multi-repo); si falta, todos. */
+  repos?: string[];
 }
 
 const SCHEMA = `
@@ -39,7 +42,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   profile_id TEXT NOT NULL, state TEXT NOT NULL, level INTEGER NOT NULL, parent_id TEXT, routine_id TEXT,
   branch TEXT, worktree_path TEXT, session_id TEXT, session_started INTEGER NOT NULL DEFAULT 0, next_prompt TEXT, blocked_reason TEXT, summary TEXT,
   attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'task', questions TEXT, release TEXT NOT NULL DEFAULT 'none'
+  kind TEXT NOT NULL DEFAULT 'task', questions TEXT, release TEXT NOT NULL DEFAULT 'none', repos TEXT
 );
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, session_id TEXT NOT NULL,
@@ -77,6 +80,10 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, endpoint TEXT NOT NULL UNIQUE, keys TEXT NOT NULL,
   created_at TEXT NOT NULL, last_error TEXT
 );
+-- Proyectos silenciados por dispositivo (fila = no recibir avisos de ese proyecto).
+CREATE TABLE IF NOT EXISTS device_projects (
+  device_id TEXT NOT NULL, project_id TEXT NOT NULL, PRIMARY KEY (device_id, project_id)
+);
 CREATE TABLE IF NOT EXISTS metric_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, source TEXT NOT NULL, taken_at TEXT NOT NULL,
   ok INTEGER NOT NULL, data TEXT NOT NULL DEFAULT '{}', error TEXT
@@ -90,7 +97,7 @@ CREATE TABLE IF NOT EXISTS config_overrides (
   kind TEXT NOT NULL, id TEXT NOT NULL, origin TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL, device_id TEXT,
   PRIMARY KEY (kind, id)
 );
-CREATE TABLE IF NOT EXISTS assistant_calls (id INTEGER PRIMARY KEY, at TEXT NOT NULL, cost_usd REAL NOT NULL, ok INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS assistant_calls (id INTEGER PRIMARY KEY, at TEXT NOT NULL, cost_usd REAL NOT NULL, ok INTEGER NOT NULL, project_id TEXT);
 `;
 
 type Row = Record<string, unknown>;
@@ -99,7 +106,7 @@ const now = () => new Date().toISOString();
 const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
   title: 'title', description: 'description', level: 'level', branch: 'branch', worktreePath: 'worktree_path',
   sessionId: 'session_id', sessionStarted: 'session_started', nextPrompt: 'next_prompt', blockedReason: 'blocked_reason', summary: 'summary',
-  attempts: 'attempts', questions: 'questions', release: 'release',
+  attempts: 'attempts', questions: 'questions', release: 'release', repos: 'repos',
 };
 
 const toTask = (r: Row): Task => ({
@@ -119,6 +126,7 @@ const toTask = (r: Row): Task => ({
   kind: ((r.kind as string | null) ?? 'task') as TaskKind,
   questions: r.questions ? (JSON.parse(r.questions as string) as Question[]) : null,
   release: ((r.release as string | null) ?? 'none') as Release,
+  repos: r.repos ? (JSON.parse(r.repos as string) as string[]) : null,
   nextPrompt: (r.next_prompt as string | null) ?? null,
   blockedReason: (r.blocked_reason as string | null) ?? null,
   summary: (r.summary as string | null) ?? null,
@@ -211,6 +219,8 @@ export class Store {
     if (!tasks.includes('kind')) this.db.exec("ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
     if (!tasks.includes('questions')) this.db.exec('ALTER TABLE tasks ADD COLUMN questions TEXT');
     if (!tasks.includes('release')) this.db.exec("ALTER TABLE tasks ADD COLUMN release TEXT NOT NULL DEFAULT 'none'");
+    if (!tasks.includes('repos')) this.db.exec('ALTER TABLE tasks ADD COLUMN repos TEXT');
+    if (!(this.db.prepare('PRAGMA table_info(assistant_calls)').all() as Row[]).some((c) => c.name === 'project_id')) this.db.exec('ALTER TABLE assistant_calls ADD COLUMN project_id TEXT');
     const runs = columns('runs');
     if (!runs.includes('cost_usd')) this.db.exec('ALTER TABLE runs ADD COLUMN cost_usd REAL');
     if (!runs.includes('context_tokens')) this.db.exec('ALTER TABLE runs ADD COLUMN context_tokens INTEGER');
@@ -307,13 +317,15 @@ export class Store {
       this.db.prepare('INSERT OR IGNORE INTO counters (project_id, next) VALUES (?, ?)').run(project.id, project.startNumber ?? 1);
       const { next } = this.db.prepare('SELECT next FROM counters WHERE project_id = ?').get(project.id) as { next: number };
       this.db.prepare('UPDATE counters SET next = next + 1 WHERE project_id = ?').run(project.id);
+      // Un proyecto de un repo guarda null (= todos); en multi-repo se valida y se guarda la lista.
+      const repos = (project.repos?.length ?? 1) > 1 && input.repos ? taskRepoIds(project, { repos: input.repos }) : null;
       const id = `${project.prefix}-${next}`;
       const t = now();
       this.db.prepare(
-        `INSERT INTO tasks (id, project_id, title, description, profile_id, state, level, parent_id, routine_id, attempts, created_at, updated_at, kind, release)
-         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, 0, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, project_id, title, description, profile_id, state, level, parent_id, routine_id, attempts, created_at, updated_at, kind, release, repos)
+         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
       ).run(id, project.id, input.title, input.description, input.profileId, input.level,
-        input.parentId ?? null, input.routineId ?? null, t, t, input.kind ?? 'task', input.release ?? 'none');
+        input.parentId ?? null, input.routineId ?? null, t, t, input.kind ?? 'task', input.release ?? 'none', repos ? JSON.stringify(repos) : null);
       return this.getTask(id);
     })();
   }
@@ -329,11 +341,14 @@ export class Store {
     return t;
   }
 
-  listTasks(states?: TaskState[], page?: { limit: number; offset: number; newestFirst?: boolean }): Task[] {
-    const where = states && states.length ? `WHERE state IN (${states.map(() => '?').join(',')})` : '';
-    const params: unknown[] = states && states.length ? [...states] : [];
+  listTasks(states?: TaskState[], page?: { limit?: number; offset?: number; newestFirst?: boolean; projectId?: string }): Task[] {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (states && states.length) { conds.push(`state IN (${states.map(() => '?').join(',')})`); params.push(...states); }
+    if (page?.projectId) { conds.push('project_id = ?'); params.push(page.projectId); }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
     let sql = `SELECT * FROM tasks ${where} ORDER BY rowid${page?.newestFirst ? ' DESC' : ''}`;
-    if (page) { sql += ' LIMIT ? OFFSET ?'; params.push(page.limit, page.offset); }
+    if (page?.limit !== undefined) { sql += ' LIMIT ? OFFSET ?'; params.push(page.limit, page.offset ?? 0); }
     return (this.db.prepare(sql).all(...params) as Row[]).map(toTask);
   }
 
@@ -343,7 +358,7 @@ export class Store {
     if (entries.length) {
       const sets = entries.map(([k]) => `${TASK_COLUMNS[k]} = ?`).join(', ');
       const values = entries.map(([k, v]) =>
-        k === 'questions' ? (v === null ? null : JSON.stringify(v)) : typeof v === 'boolean' ? Number(v) : v);
+        k === 'questions' || k === 'repos' ? (v === null ? null : JSON.stringify(v)) : typeof v === 'boolean' ? Number(v) : v);
       this.db.prepare(`UPDATE tasks SET ${sets}, updated_at = ? WHERE id = ?`).run(...values, now(), id);
     }
     return this.getTask(id);
@@ -450,55 +465,61 @@ export class Store {
     return out;
   }
 
-  /** Gasto equivalente: hoy (desde las 00:00 locales) y últimos 7 días naturales incluido hoy. */
-  spend(nowDate: Date): Spend {
+  /**
+   * Gasto equivalente: hoy (desde las 00:00 locales) y últimos 7 días naturales incluido hoy.
+   * Con `projectId`, solo el de ese proyecto; las llamadas viejas del asistente (sin proyecto) cuentan solo en el total.
+   */
+  spend(nowDate: Date, projectId?: string): Spend {
     const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
     const startOfWeek = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 6);
     const sum = (from: Date) => (this.db.prepare(
-      `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM runs WHERE cost_usd IS NOT NULL AND started_at >= @f)
-            + (SELECT COALESCE(SUM(cost_usd), 0) FROM assistant_calls WHERE at >= @f) AS s`,
-    ).get({ f: from.toISOString() }) as { s: number }).s;
+      `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM runs WHERE cost_usd IS NOT NULL AND started_at >= @f
+                 AND (@p IS NULL OR task_id IN (SELECT id FROM tasks WHERE project_id = @p)))
+            + (SELECT COALESCE(SUM(cost_usd), 0) FROM assistant_calls WHERE at >= @f AND (@p IS NULL OR project_id = @p)) AS s`,
+    ).get({ f: from.toISOString(), p: projectId ?? null }) as { s: number }).s;
     return { today: sum(startOfToday), week: sum(startOfWeek) };
   }
 
   // Las consultas de gasto van juntas: si se suma otra fuente de coste, se añade aquí a las tres.
 
   /** Gasto equivalente por día local desde `fromIso`; solo los días con gasto, en orden. */
-  spendByDay(fromIso: string): { day: string; usd: number }[] {
+  spendByDay(fromIso: string, projectId?: string): { day: string; usd: number }[] {
     return (this.db.prepare(`SELECT day, SUM(usd) AS usd FROM (
         SELECT date(started_at, 'localtime') AS day, cost_usd AS usd FROM runs WHERE cost_usd IS NOT NULL AND started_at >= @f
+          AND (@p IS NULL OR task_id IN (SELECT id FROM tasks WHERE project_id = @p))
         UNION ALL
-        SELECT date(at, 'localtime') AS day, cost_usd AS usd FROM assistant_calls WHERE at >= @f
-      ) GROUP BY day ORDER BY day`).all({ f: fromIso }) as Row[])
+        SELECT date(at, 'localtime') AS day, cost_usd AS usd FROM assistant_calls WHERE at >= @f AND (@p IS NULL OR project_id = @p)
+      ) GROUP BY day ORDER BY day`).all({ f: fromIso, p: projectId ?? null }) as Row[])
       .map((r) => ({ day: r.day as string, usd: r.usd as number }));
   }
 
   /** Gasto equivalente desde `fromIso` por rutina o por perfil de la tarea, del más caro al más barato; por rutina no cuentan las tareas sin rutina. */
-  spendBy(field: 'routine' | 'profile', fromIso: string): { key: string; usd: number; runs: number }[] {
+  spendBy(field: 'routine' | 'profile', fromIso: string, projectId?: string): { key: string; usd: number; runs: number }[] {
     const col = field === 'routine' ? 't.routine_id' : 't.profile_id';
     // Las llamadas del asistente no tienen rutina ni perfil: salen bajo la clave «Asistente».
     return (this.db.prepare(`SELECT k, SUM(usd) AS usd, SUM(n) AS n FROM (
         SELECT ${col} AS k, SUM(r.cost_usd) AS usd, COUNT(*) AS n FROM runs r JOIN tasks t ON t.id = r.task_id
-          WHERE r.cost_usd IS NOT NULL AND r.started_at >= @f AND ${col} IS NOT NULL GROUP BY k
+          WHERE r.cost_usd IS NOT NULL AND r.started_at >= @f AND ${col} IS NOT NULL AND (@p IS NULL OR t.project_id = @p) GROUP BY k
         UNION ALL
-        SELECT 'Asistente' AS k, SUM(cost_usd) AS usd, COUNT(*) AS n FROM assistant_calls WHERE at >= @f HAVING COUNT(*) > 0
-      ) GROUP BY k ORDER BY usd DESC, k`).all({ f: fromIso }) as Row[])
+        SELECT 'Asistente' AS k, SUM(cost_usd) AS usd, COUNT(*) AS n FROM assistant_calls WHERE at >= @f AND (@p IS NULL OR project_id = @p) HAVING COUNT(*) > 0
+      ) GROUP BY k ORDER BY usd DESC, k`).all({ f: fromIso, p: projectId ?? null }) as Row[])
       .map((r) => ({ key: r.k as string, usd: r.usd as number, runs: r.n as number }));
   }
 
   /** Intentos del asistente desde `fromIso` (con o sin éxito). */
-  assistantCallsSince(fromIso: string): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM assistant_calls WHERE at >= ?').get(fromIso) as { n: number }).n;
+  assistantCallsSince(fromIso: string, projectId?: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM assistant_calls WHERE at >= @f AND (@p IS NULL OR project_id = @p)').get({ f: fromIso, p: projectId ?? null }) as { n: number }).n;
   }
 
   /** Guarda lo que costó una llamada del asistente de rutinas (cuenta en el gasto de Faro). */
-  recordAssistantCall(costUsd: number, ok: boolean): void {
-    this.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok) VALUES (?, ?, ?)').run(now(), costUsd, ok ? 1 : 0);
+  recordAssistantCall(costUsd: number, ok: boolean, projectId?: string): void {
+    this.db.prepare('INSERT INTO assistant_calls (at, cost_usd, ok, project_id) VALUES (?, ?, ?, ?)').run(now(), costUsd, ok ? 1 : 0, projectId ?? null);
   }
 
   /** Ejecuciones de agentes empezadas desde `fromIso` (con o sin coste conocido). */
-  runCount(fromIso: string): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM runs WHERE started_at >= ?').get(fromIso) as { n: number }).n;
+  runCount(fromIso: string, projectId?: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM runs WHERE started_at >= @f AND (@p IS NULL OR task_id IN (SELECT id FROM tasks WHERE project_id = @p))')
+      .get({ f: fromIso, p: projectId ?? null }) as { n: number }).n;
   }
 
   /**
@@ -766,7 +787,29 @@ export class Store {
       const info = this.db.prepare('DELETE FROM devices WHERE id = ?').run(id);
       if (info.changes === 0) throw new NotFoundError(`El dispositivo ${id} no existe`);
       this.db.prepare('DELETE FROM push_subscriptions WHERE device_id = ?').run(id);
+      this.db.prepare('DELETE FROM device_projects WHERE device_id = ?').run(id);
     })();
+  }
+
+  /** Ids de los proyectos que el dispositivo ha silenciado. */
+  mutedProjects(deviceId: string): string[] {
+    return (this.db.prepare('SELECT project_id FROM device_projects WHERE device_id = ? ORDER BY project_id').all(deviceId) as Row[]).map((r) => String(r.project_id));
+  }
+
+  /** `on` = el dispositivo recibe avisos del proyecto (quita la fila); `!on` lo silencia. */
+  setDeviceProject(deviceId: string, projectId: string, on: boolean): void {
+    if (on) this.db.prepare('DELETE FROM device_projects WHERE device_id = ? AND project_id = ?').run(deviceId, projectId);
+    else this.db.prepare('INSERT OR IGNORE INTO device_projects (device_id, project_id) VALUES (?, ?)').run(deviceId, projectId);
+  }
+
+  /** Pares «dispositivo → proyectos silenciados» (para filtrar envíos sin una consulta por suscripción). */
+  mutedByDevice(): Map<string, Set<string>> {
+    const m = new Map<string, Set<string>>();
+    for (const r of this.db.prepare('SELECT device_id, project_id FROM device_projects').all() as Row[]) {
+      const k = String(r.device_id);
+      m.set(k, (m.get(k) ?? new Set()).add(String(r.project_id)));
+    }
+    return m;
   }
 
   // --- suscripciones push ---

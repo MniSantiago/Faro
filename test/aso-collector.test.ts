@@ -190,7 +190,7 @@ describe('AsoCollector', () => {
     world.subtitle = 'B';
     await c.collectAll();
     expect(push.send).toHaveBeenCalledTimes(1);
-    expect(push.send).toHaveBeenCalledWith({ title: 'Opal ha cambiado su subtítulo (es)', body: expect.any(String), url: '/#/aso' });
+    expect(push.send).toHaveBeenCalledWith({ title: 'Opal ha cambiado su subtítulo (es)', body: expect.any(String), url: '/#/aso?p=demo' }, { projectId: 'demo' });
     world.subtitle = 'C';
     await c.collectAll();
     expect(push.send).toHaveBeenCalledTimes(1);
@@ -204,7 +204,7 @@ describe('AsoCollector', () => {
     world.results.es = [{ trackId: 1 }]; // ya no aparece
     const c = build({ stores: ['es'] });
     await c.collectAll();
-    expect(push.send).toHaveBeenCalledWith({ title: 'Demo baja en «bloquear» (es)', body: 'Del 4 al —', url: '/#/aso' });
+    expect(push.send).toHaveBeenCalledWith({ title: 'Demo baja en «bloquear» (es)', body: 'Del 4 al —', url: '/#/aso?p=demo' }, { projectId: 'demo' });
     await c.collectAll();
     expect(push.send).toHaveBeenCalledTimes(1);
   });

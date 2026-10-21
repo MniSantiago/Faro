@@ -18,6 +18,8 @@ export interface RoutineConfig {
   context?: 'metrics' | 'estado' | 'aso';
   /** Tope de gasto por ejecución (`--max-budget-usd`); manda sobre el del perfil. */
   maxBudgetUsd?: number;
+  /** Repos que usan las tareas de la rutina (ids del proyecto); si falta, todos. */
+  repos?: string[];
 }
 export interface ReleaseConfig { cwd: string; build: string; submit: string; timeoutMinutes?: number }
 export interface RoutineRow {
@@ -45,10 +47,25 @@ export interface CheckConfig {
   whenChanged?: string;
 }
 
+/** Un repo del proyecto. Los proyectos de un solo repo tienen uno con id `main`. */
+export interface RepoConfig {
+  id: string;
+  name?: string;
+  path: string;
+  baseBranch: string;
+  remote: string;
+  prepare?: string[];
+  exclude?: string[];
+  checks?: CheckConfig[];
+  github?: ProjectConfig['github'];
+  release?: ReleaseConfig;
+}
+
 export interface ProjectConfig {
   id: string;
   name: string;
   prefix: string;
+  /** Tras `normalizeConfig` los campos de repo del proyecto (repoPath, baseBranch, remote, prepare, exclude, checks, github, release) reflejan `repos[0]`. */
   repoPath: string;
   baseBranch: string;
   remote: string;
@@ -74,6 +91,18 @@ export interface ProjectConfig {
   metrics?: MetricsConfig;
   /** Vigilancia ASO (ranking, competidores y ficha) del proyecto en el App Store. */
   aso?: AsoConfig;
+  /** Repos del proyecto (en el archivo, o esto o los campos sueltos); tras normalizar siempre está y no es vacío. */
+  repos?: RepoConfig[];
+  /** Carpeta común de los repos (p. ej. Acme). */
+  rootPath?: string;
+  /** Copia el CLAUDE.md de rootPath a la carpeta de cada tarea multi-repo (por defecto, no). */
+  copyRootClaudeMd?: boolean;
+  /** Instrucciones del proyecto para todos los perfiles. */
+  instructions?: string;
+  /** Notas por perfil (id de perfil → texto) en este proyecto. */
+  profileNotes?: Record<string, string>;
+  /** Ejecuciones simultáneas del proyecto (por defecto 2). */
+  maxConcurrentRuns?: number;
   /** Ventana de contexto por defecto de las tareas del proyecto si la ejecución no la informa (200000 si falta). */
   contextWindow?: number;
 }
@@ -121,7 +150,8 @@ export interface FaroConfig {
   claudeBin: string;
   /** CLI de GitHub (por defecto `gh`). */
   ghBin?: string;
-  maxConcurrentRuns: number;
+  /** Tope global de ejecuciones simultáneas, si se quiere (cada proyecto tiene el suyo). */
+  maxConcurrentRuns?: number;
   /** Lanza agentes y comprobaciones dentro de `sandbox-exec` en macOS (por defecto, sí). */
   sandbox?: boolean;
   /** Nombre del panel en la web (por defecto «Faro»). */
@@ -154,6 +184,8 @@ export interface Task {
   questions: Question[] | null;
   /** Qué lanza Faro al integrar. Lo fija el usuario o la rutina, nunca el agente. */
   release: Release;
+  /** Ids de los repos que usa la tarea; null = todos los del proyecto. */
+  repos: string[] | null;
   nextPrompt: string | null;
   blockedReason: string | null;
   summary: string | null;
@@ -245,3 +277,10 @@ export type BusMessage =
 
 /** Dispositivo emparejado para el acceso remoto (fase 3). */
 export interface Device { id: string; name: string; createdAt: string; lastSeenAt: string | null }
+
+/** Un proyecto tal como se escribe en `faro.config.ts`: `repos`, o bien `repoPath`, `baseBranch` y `remote` sueltos. */
+export type ProjectInput = Omit<ProjectConfig, 'repoPath' | 'baseBranch' | 'remote'> & (
+  | { repos?: undefined; repoPath: string; baseBranch: string; remote: string }
+  | { repos: RepoConfig[]; repoPath?: string; baseBranch?: string; remote?: string }
+);
+export type FaroConfigInput = Omit<FaroConfig, 'projects'> & { projects: ProjectInput[] };

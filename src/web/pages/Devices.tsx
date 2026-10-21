@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Device } from '../../server/types';
-import { authState, createPairingCode, devices, pushKey, pushSubscribe, pushTest, pushUnsubscribe, revokeDevice } from '../api';
+import { authState, createPairingCode, deviceProjects, devices, pushKey, pushSubscribe, pushTest, pushUnsubscribe, revokeDevice, setDeviceProject } from '../api';
+import { useProject } from '../project';
 import { isIos, isStandalone, urlBase64ToUint8Array } from '../push';
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -19,6 +20,38 @@ function PairingCode({ code, expiresAt, onExpire }: { code: string; expiresAt: s
     <div className="card">
       <p className="paircode" aria-label="Código de vinculación">{code}</p>
       <p className="muted">Caduca en {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}. Escríbelo en el dispositivo que quieras vincular.</p>
+    </div>
+  );
+}
+
+/** Un interruptor por proyecto: «Avisos de <proyecto>» en este dispositivo vinculado. */
+function DeviceProjects({ deviceId }: { deviceId: string }) {
+  const [list, setList] = useState<{ id: string; name: string; muted: boolean }[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let ignore = false;
+    deviceProjects(deviceId).then((r) => { if (!ignore) setList(r.projects); }).catch((e: Error) => { if (!ignore) setError(e.message); });
+    return () => { ignore = true; };
+  }, [deviceId]);
+  const toggle = async (pid: string, on: boolean) => {
+    setBusy(pid); setError(null);
+    try {
+      await setDeviceProject(deviceId, pid, on);
+      setList((cur) => cur?.map((p) => (p.id === pid ? { ...p, muted: !on } : p)) ?? cur);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  if (error && !list) return <p className="error">{error}</p>;
+  if (!list) return null;
+  return (
+    <div className="dev-projects">
+      {list.map((p) => (
+        <label key={p.id} className="check">
+          <input type="checkbox" checked={!p.muted} disabled={busy === p.id} onChange={(e) => void toggle(p.id, e.target.checked)} />
+          Avisos de {p.name}
+        </label>
+      ))}
+      {error && <p className="error" role="alert">{error}</p>}
     </div>
   );
 }
@@ -94,6 +127,7 @@ export function Devices() {
   const [list, setList] = useState<Device[] | null>(null);
   const [pairing, setPairing] = useState<{ code: string; expiresAt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const many = useProject().projects.length > 1;
 
   const load = useCallback(() => { devices().then(setList).catch((e: Error) => setError(e.message)); }, []);
   useEffect(() => { load(); authState().then((s) => setLocal(s.local)).catch(() => {}); }, [load]);
@@ -128,6 +162,7 @@ export function Devices() {
                 <button className="btn small" onClick={() => revoke(d)}>Revocar</button>
               </div>
               <span className="muted">Creado {fmt(d.createdAt)} · último uso {fmt(d.lastSeenAt)}</span>
+              {many && <DeviceProjects deviceId={d.id} />}
             </li>
           ))}
         </ul>

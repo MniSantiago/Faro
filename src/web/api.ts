@@ -14,7 +14,7 @@ import type { Approval, Artifact, BusMessage, Comment, Device, EventRow, Job, Le
 export type { BacklogItem, HomeMetric, HomeView, PlanState, RoutineDraft, SeriesView };
 
 export interface ConfigView {
-  projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean }[];
+  projects: { id: string; name: string; prefix: string; release: boolean; metrics: boolean; aso: boolean; plan: boolean; repos: { id: string; name: string }[]; multiRepo: boolean }[];
   profiles: { id: string; name: string; defaultLevel: Level }[];
   coordinatorProfile: string;
   /** Nombre del panel (config `title`, por defecto «Faro»). */
@@ -77,6 +77,11 @@ export interface AsoView {
 }
 export interface AsoObservationView { keywordId: number; takenAt: string; ok: boolean; popularity: number | null; difficulty: number | null; rank: number | null; error: string | null }
 
+/** `?project=<id>` (o `&project=` si ya hay query) cuando hay proyecto; vacío si no. */
+function projectQuery(projectId?: string, sep = '?'): string {
+  return projectId ? `${sep}project=${encodeURIComponent(projectId)}` : '';
+}
+
 export const api = {
   aso: (project: string, store: string) => req<AsoView>('GET', `/api/aso?project=${encodeURIComponent(project)}&store=${encodeURIComponent(store)}`),
   asoHistory: (keywordId: number) => req<AsoObservationView[]>('GET', `/api/aso/keywords/${keywordId}/history`),
@@ -105,16 +110,16 @@ export const api = {
   deleteProfileConfig: (id: string) => req<{ ok: true }>('DELETE', `/api/config/profiles/${encodeURIComponent(id)}`),
   saveProjectConfig: (id: string, b: ProjectUpdateBody) => req<ConfigProjectView>('PATCH', `/api/config/projects/${encodeURIComponent(id)}`, b),
   saveGeneralConfig: (b: GeneralUpdateBody) => req<ConfigGeneralView>('PATCH', '/api/config/general', b),
-  routines: () => req<RoutineView[]>('GET', '/api/routines'),
+  routines: (projectId?: string) => req<RoutineView[]>('GET', `/api/routines${projectQuery(projectId)}`),
   runRoutine: (id: string) => req<Task>('POST', `/api/routines/${id}/run`),
   toggleRoutine: (id: string) => req<unknown>('POST', `/api/routines/${id}/toggle`),
-  tasks: () => req<Task[]>('GET', '/api/tasks'),
-  stats: () => req<{ tasks: Record<string, TaskStats>; spend: Spend }>('GET', '/api/stats'),
-  history: (offset: number) => req<Task[]>('GET', `/api/tasks?state=done,discarded&limit=50&offset=${offset}`),
+  tasks: (projectId?: string) => req<Task[]>('GET', `/api/tasks${projectQuery(projectId)}`),
+  stats: (projectId?: string) => req<{ tasks: Record<string, TaskStats>; spend: Spend }>('GET', `/api/stats${projectQuery(projectId)}`),
+  history: (offset: number, projectId?: string) => req<Task[]>('GET', `/api/tasks?state=done,discarded&limit=50&offset=${offset}${projectQuery(projectId, '&')}`),
   children: (parentId: string) => req<Task[]>('GET', `/api/tasks?parent=${encodeURIComponent(parentId)}`),
   task: (id: string) => req<TaskDetail>('GET', `/api/tasks/${id}`),
   events: (id: string, after = 0) => req<EventRow[]>('GET', `/api/tasks/${id}/events?after=${after}`),
-  create: (b: { projectId: string; title: string; description: string; profileId: string; level: Level; draft: boolean; release?: Release }) =>
+  create: (b: { projectId: string; title: string; description: string; profileId: string; level: Level; draft: boolean; release?: Release; repos?: string[] }) =>
     req<Task>('POST', '/api/tasks', b),
   release: (id: string) => req<Job>('POST', `/api/tasks/${id}/release`),
   retryJob: (jobId: number) => req<Job>('POST', `/api/jobs/${jobId}/retry`),
@@ -133,7 +138,7 @@ export const api = {
   planAdd: (projectId: string, text: string) => req<BacklogItem>('POST', `/api/plan/${projectId}/backlog`, { text }),
   planDone: (projectId: string, item: number, isDone: boolean) => req<BacklogItem>('POST', `/api/plan/${projectId}/backlog/${item}`, { isDone }),
   planTested: (projectId: string, taskId: string, tested: boolean) => req<{ ok: true }>('POST', `/api/plan/${projectId}/tested/${taskId}`, { tested }),
-  pushState: () => req<{ projects: PushState[] }>('GET', '/api/push-state'),
+  pushState: (projectId?: string) => req<{ projects: PushState[] }>('GET', `/api/push-state${projectQuery(projectId)}`),
   pushProject: (projectId: string) => req<{ ok: true }>('POST', `/api/projects/${projectId}/push`),
   queue: () => req<QueueState>('GET', '/api/queue'),
   resumeQueue: () => req<QueueState>('POST', '/api/queue/resume'),
@@ -156,12 +161,15 @@ export const authApi = {
   pair: (code: string, name: string) => req<{ device: Device }>('POST', '/api/devices/pair', { code, name }),
   devices: () => req<Device[]>('GET', '/api/devices'),
   revokeDevice: (id: string) => req<{ ok: true }>('POST', `/api/devices/${encodeURIComponent(id)}/revoke`),
+  // Avisos por proyecto de un dispositivo (silenciado = muted).
+  deviceProjects: (id: string) => req<{ projects: { id: string; name: string; muted: boolean }[] }>('GET', `/api/devices/${encodeURIComponent(id)}/projects`),
+  setDeviceProject: (id: string, projectId: string, on: boolean) => req<{ ok: true }>('POST', `/api/devices/${encodeURIComponent(id)}/projects`, { projectId, on }),
   pushKey: () => req<{ publicKey: string }>('GET', '/api/push/key'),
   pushSubscribe: (sub: PushSubscriptionInput) => req<{ ok: true }>('POST', '/api/push/subscribe', sub),
   pushUnsubscribe: (endpoint: string) => req<{ ok: true }>('POST', '/api/push/unsubscribe', { endpoint }),
   pushTest: () => req<{ sent: number; failed: number }>('POST', '/api/push/test'),
 };
-export const { authState, createPairingCode, pair, devices, revokeDevice, pushKey, pushSubscribe, pushUnsubscribe, pushTest } = authApi;
+export const { authState, createPairingCode, pair, devices, revokeDevice, deviceProjects, setDeviceProject, pushKey, pushSubscribe, pushUnsubscribe, pushTest } = authApi;
 
 export const artifactUrl = (id: number) => `/api/artifacts/${id}/file`;
 
@@ -206,7 +214,9 @@ export function mergeEvents(prev: EventRow[], incoming: EventRow[]): EventRow[] 
 }
 
 /** Cambios sin subir de un proyecto: commits por delante del remoto y tareas con el push pendiente. */
-export interface PushState { id: string; name: string; remote: string; baseBranch: string; ahead: number; pending: string[] }
+export interface PushRepoState { id: string; name: string; remote: string; baseBranch: string; ahead: number }
+/** `repos`: los que van por delante de su remoto. */
+export interface PushState { id: string; name: string; remote: string; baseBranch: string; multiRepo: boolean; ahead: number; repos: PushRepoState[]; pending: string[] }
 
 export const STATE_LABEL: Record<Task['state'], string> = {
   draft: 'Borrador', queued: 'En cola', working: 'Trabajando', blocked: 'Bloqueada',

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Task } from '../../server/types';
 import { api, STATE_LABEL } from '../api';
+import { useProject } from '../project';
 
 const PAGE = 50;
 const when = (iso: string) => new Date(iso).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 /** Historial: tareas hechas y descartadas, más recientes primero, de 50 en 50. */
 export function History() {
+  const { projectId } = useProject();
+  const project = projectId ?? undefined;
   const [items, setItems] = useState<Task[]>([]);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -16,7 +19,7 @@ export function History() {
   const load = useCallback((offset: number) => {
     setLoading(true);
     setError(null);
-    api.history(offset).then((page) => {
+    api.history(offset, project).then((page) => {
       if (!alive.current) return;
       setItems((prev) => {
         const ids = new Set(prev.map((t) => t.id));
@@ -25,7 +28,7 @@ export function History() {
       setMore(page.length === PAGE);
     }).catch((e: Error) => { if (alive.current) setError(e.message); })
       .finally(() => { if (alive.current) setLoading(false); });
-  }, []);
+  }, [project]);
 
   useEffect(() => {
     alive.current = true;

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ActionError } from '../src/server/errors';
 import { ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner } from '../src/server/runner/runner';
 import { Store } from '../src/server/store';
@@ -23,7 +23,7 @@ function setup() {
   const bus = new Bus();
   const workspaces = new GitWorkspaces();
   const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env: { FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'hola.txt' }, killGraceMs: 100 });
-  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
   const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
   return { repo, origin, store, actions, orch, workspaces, config };
 }

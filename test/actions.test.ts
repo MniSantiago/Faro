@@ -4,14 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { ActionError, BadRequestError, chatTitle, ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
 import { getProject } from '../src/server/config';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner } from '../src/server/runner/runner';
 import { Store } from '../src/server/store';
 import type { FaroConfig } from '../src/server/types';
 import { isIntegrating, withIntegrationLock } from '../src/server/locks';
 import { GitWorkspaces } from '../src/server/workspaces';
-import { fixture, gitSync, makeConfig, makeRepo, tmpDir, until } from './helpers';
+import { fixture, gitSync, makeConfig, makeMultiConfig, makeRepo, tmpDir, until } from './helpers';
 
 function setup(env: Record<string, string>, over: Partial<FaroConfig> = {}) {
   const repo = makeRepo();
@@ -20,7 +20,7 @@ function setup(env: Record<string, string>, over: Partial<FaroConfig> = {}) {
   const bus = new Bus();
   const workspaces = new GitWorkspaces();
   const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
-  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
   const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
   return { repo, config, store, orch, actions, runner };
 }
@@ -161,7 +161,7 @@ describe('ReviewActions', () => {
     });
     const env = { FAKE_FIXTURES: fixture('stream-done.jsonl') };
     const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
-    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
     const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
     const t = actions.createTask(input);
     await orch.waitIdle();
@@ -215,7 +215,7 @@ describe('ReviewActions', () => {
       discard: async () => { throw new Error('git roto'); },
     });
     const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env: DONE, killGraceMs: 100 });
-    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
     const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
     const t = actions.createTask(input);
     await orch.waitIdle();
@@ -463,7 +463,7 @@ describe('ReviewActions · revisión final de la fase 2', () => {
     const base = new GitWorkspaces();
     const workspaces = Object.assign(new GitWorkspaces(), wsOver(base));
     const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
-    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
     const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
     return { repo, config, store, orch, actions, bus };
   }
@@ -548,4 +548,58 @@ describe('ReviewActions · revisión final de la fase 2', () => {
     expect(states.filter((x) => x === 'review')).toHaveLength(0);
     expect(s.store.getTask(t.id).state).toBe('done');
   }, 20_000);
+});
+
+describe('ReviewActions · varios repos', () => {
+  function multiSetup(env: Record<string, string>) {
+    const config = makeMultiConfig({ coordinatorProfile: 'dev' });
+    const store = new Store(':memory:');
+    const bus = new Bus();
+    const workspaces = new GitWorkspaces();
+    const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
+    const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner });
+    const project = getProject(config, 'multi');
+    const repo = (id: string) => project.repos!.find((r) => r.id === id)!.path;
+    return { store, orch, actions, repo };
+  }
+
+  it('discard multi-repo guarda lo sin commitear, archiva la rama en cada repo y borra la carpeta', async () => {
+    const s = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'a/x.txt', FAKE_WRITE_ARTIFACT: 'b/y.txt' });
+    const t = s.actions.createTask({ projectId: 'multi', title: 'Dos repos', description: '', profileId: 'dev', level: 1 });
+    await s.orch.waitIdle();
+    const { branch, worktreePath } = s.store.getTask(t.id);
+    writeFileSync(path.join(worktreePath!, 'b', 'sin-commit.txt'), 'a medias\n');
+    await s.actions.discard(t.id);
+    expect(s.store.getTask(t.id).state).toBe('discarded');
+    expect(existsSync(worktreePath!)).toBe(false);
+    for (const id of ['a', 'b']) expect(gitSync(s.repo(id), 'branch', '--list', `archive/${branch}`)).toContain(branch!);
+    expect(gitSync(s.repo('b'), 'show', `archive/${branch}:sin-commit.txt`)).toBe('a medias\n');
+  });
+
+  it('discard multi-repo sin el worktree de un repo guarda igual lo de los demás y lo deja dicho', async () => {
+    const s = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl'), FAKE_WRITE: 'a/x.txt', FAKE_WRITE_ARTIFACT: 'b/y.txt' });
+    const t = s.actions.createTask({ projectId: 'multi', title: 'Falta uno', description: '', profileId: 'dev', level: 1 });
+    await s.orch.waitIdle();
+    const { branch, worktreePath } = s.store.getTask(t.id);
+    // El worktree de `a` ha desaparecido (borrado a mano); en `b` hay trabajo sin commitear.
+    gitSync(s.repo('a'), 'worktree', 'remove', '--force', path.join(worktreePath!, 'a'));
+    writeFileSync(path.join(worktreePath!, 'b', 'sin-commit.txt'), 'a medias\n');
+    await s.actions.discard(t.id);
+    expect(s.store.getTask(t.id).state).toBe('discarded');
+    expect(gitSync(s.repo('b'), 'show', `archive/${branch}:sin-commit.txt`)).toBe('a medias\n');
+    for (const id of ['a', 'b']) expect(gitSync(s.repo(id), 'branch', '--list', `archive/${branch}`)).toContain(branch!);
+    expect(s.store.listComments(t.id).some((c) => c.author === 'faro' && c.body.includes('a') && c.body.includes('worktree'))).toBe(true);
+  });
+
+  it('archivar un chat multi-repo borra sus worktrees y la carpeta', async () => {
+    const s = multiSetup({ FAKE_FIXTURES: fixture('stream-done.jsonl') });
+    const t = s.actions.createChat({ projectId: 'multi', text: 'Hola' });
+    await s.orch.waitIdle();
+    const wt = s.store.getTask(t.id).worktreePath!;
+    expect(existsSync(path.join(wt, 'a'))).toBe(true);
+    await s.actions.discard(t.id);
+    expect(existsSync(wt)).toBe(false);
+    for (const id of ['a', 'b']) expect(gitSync(s.repo(id), 'worktree', 'list').trim().split('\n')).toHaveLength(1);
+  });
 });

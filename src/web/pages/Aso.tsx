@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AsoCompetitorView, type AsoObservationView, type AsoProposalView, type AsoView } from '../api';
+import { useCurrentProject, useProject } from '../project';
 import { charCount, competitorChanges, formatDelta, formatRank, showSubtitle, sortKeywords, type KeywordRow, type SortBy } from '../aso';
 
 const STORE_KEY = 'faro.aso.store';
@@ -231,8 +232,10 @@ function Competitors({ project, rows, onChange }: { project: string; rows: AsoCo
 }
 
 export function Aso() {
-  const [project, setProject] = useState<string | null>(null);
-  const [configLoaded, setConfigLoaded] = useState(false);
+  // Solo el proyecto actual, y solo si tiene ASO.
+  const cur = useCurrentProject();
+  const project = cur?.aso ? cur.id : null;
+  const many = useProject().projects.length > 1;
   const [storeId, setStoreId] = useState<string | null>(loadStore);
   const [view, setView] = useState<AsoView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -240,14 +243,6 @@ export function Aso() {
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-
-  useEffect(() => {
-    let ignore = false;
-    api.config()
-      .then((c) => { if (!ignore) { setProject(c.projects.find((p) => p.aso)?.id ?? null); setConfigLoaded(true); } })
-      .catch((e: Error) => { if (!ignore) setError(e.message); });
-    return () => { ignore = true; };
-  }, []);
 
   // Una tienda recordada que ya no existe cae a la primera de la respuesta.
   const effectiveStore = view && !view.stores.some((s) => s.id === storeId) ? view.stores[0]?.id ?? null : storeId;
@@ -275,8 +270,8 @@ export function Aso() {
   const pickStore = (id: string) => { setStoreId(id); saveStore(id); setView(null); };
 
   if (error && !view) return <div className="inbox"><p className="error" role="alert">{error}</p><button className="btn" onClick={reload}>Reintentar</button></div>;
-  if (!configLoaded || (project && !view)) return <p className="muted">Cargando…</p>;
-  if (!project || !view) return <div><p className="muted">Ningún proyecto tiene ASO en faro.config.ts.</p></div>;
+  if (project && !view) return <p className="muted">Cargando…</p>;
+  if (!project || !view) return <div><p className="muted">{many ? 'Este proyecto no tiene ASO en faro.config.ts.' : 'Ningún proyecto tiene ASO en faro.config.ts.'}</p></div>;
 
   const pending = view.pending;
   const refresh = () => run(async () => {

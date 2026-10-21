@@ -72,7 +72,18 @@ function applyOne(c: FaroConfig, o: OverrideRow): void {
   if (o.origin === 'file' || o.kind === 'general') {
     const el = findElement(c, o.kind, o.id);
     if (!el) throw new ConfigError(`${LABEL[o.kind]} ${o.id}: ya no está en el archivo`);
-    patch(el, omit(o.data, [...NOT_FIELDS[o.kind], 'id']));
+    const data = omit(o.data, [...NOT_FIELDS[o.kind], 'id']);
+    patch(el, data);
+    // En un proyecto con `repos` los campos de repo sueltos son el reflejo de repos[0]: el cambio va a repos[0].
+    const repos = o.kind === 'project' ? (el.repos as Obj[] | undefined) : undefined;
+    if (repos?.length) {
+      for (const k of ['repoPath', 'baseBranch', 'remote', 'prepare', 'exclude', 'checks', 'github', 'release']) {
+        if (!(k in data)) continue;
+        const rk = k === 'repoPath' ? 'path' : k;
+        if (data[k] === null || data[k] === undefined) delete repos[0][rk]; else repos[0][rk] = clone(data[k]);
+        delete el[k];
+      }
+    }
     return;
   }
   const el = patch({}, omit(o.data, NOT_FIELDS[o.kind]));

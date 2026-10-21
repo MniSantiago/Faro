@@ -3,7 +3,7 @@ import { Bus } from '../src/server/bus';
 import { getProject } from '../src/server/config';
 import { Store } from '../src/server/store';
 import { createSubtasks, notifyParent } from '../src/server/subtasks';
-import { makeConfig, makeRepo } from './helpers';
+import { makeConfig, makeMultiConfig, makeRepo } from './helpers';
 
 function env() {
   const config = makeConfig(makeRepo());
@@ -76,5 +76,34 @@ describe('notifyParent', () => {
     const before = store.listComments(parent.id).length;
     notifyParent(d, store.getTask(child.id));
     expect(store.listComments(parent.id)).toHaveLength(before);
+  });
+});
+
+describe('createSubtasks · repos', () => {
+  function multiEnv(parentRepos?: string[]) {
+    const config = makeMultiConfig();
+    const store = new Store(':memory:');
+    const d = { store, config, bus: new Bus() };
+    const parent = store.createTask(getProject(config, 'multi'), { title: 'Padre', description: '', profileId: 'dev', level: 2, repos: parentRepos });
+    return { d, store, parent };
+  }
+
+  it('una subtarea hereda los repos del padre', () => {
+    const { d, parent } = multiEnv(['a', 'b']);
+    expect(createSubtasks(d, parent, [sub()])[0]!.repos).toEqual(['a', 'b']);
+    const m2 = multiEnv();
+    expect(createSubtasks(m2.d, m2.parent, [sub()])[0]!.repos).toBeNull();
+  });
+
+  it('una subtarea puede proponer un subconjunto de los repos del padre', () => {
+    const { d, parent } = multiEnv();
+    expect(createSubtasks(d, parent, [sub({ repos: ['b'] })])[0]!.repos).toEqual(['b']);
+  });
+
+  it('una subtarea no puede añadir un repo que el padre no tiene', () => {
+    const { d, store, parent } = multiEnv(['a']);
+    const out = createSubtasks(d, parent, [sub({ repos: ['a', 'b'] }), sub({ title: 'Solo b', repos: ['b'] })]);
+    expect(out.map((t) => t.repos)).toEqual([['a'], ['a']]);
+    expect(store.listUndelivered(parent.id).at(-1)?.body).toContain('repos descartados porque MUL-1 no los tiene: b');
   });
 });

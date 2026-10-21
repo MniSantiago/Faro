@@ -87,14 +87,3 @@ export function dayLabel(day: string): string {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }).replace('.', '');
 }
-
-const PROJECT_KEY = 'faro:home-project';
-
-/** Proyecto elegido en la home (o null si no hay o el navegador no deja leer). */
-export function loadHomeProject(): string | null {
-  try { return localStorage.getItem(PROJECT_KEY); } catch { return null; }
-}
-
-export function saveHomeProject(id: string): void {
-  try { localStorage.setItem(PROJECT_KEY, id); } catch { /* sin almacenamiento: no se recuerda */ }
-}

@@ -60,12 +60,15 @@ export class Push {
     this.d.store.deletePushSubscription(endpoint);
   }
 
-  /** Envía el aviso (título y cuerpo acotados) a todas las suscripciones; 404/410 las borra y otro error queda en `last_error`. */
-  async send(msg: PushMessage): Promise<{ sent: number; failed: number }> {
+  /** Envía el aviso (título y cuerpo acotados) a todas las suscripciones (salvo las de dispositivos que silenciaron `projectId`); 404/410 las borra y otro error queda en `last_error`. */
+  async send(msg: PushMessage, opts: { projectId?: string } = {}): Promise<{ sent: number; failed: number }> {
     const payload = JSON.stringify({ title: clip(msg.title, TITLE_MAX), body: clip(msg.body, BODY_MAX), url: msg.url });
     let sent = 0;
     let failed = 0;
-    await Promise.all(this.d.store.listPushSubscriptions().map(async (s) => {
+    const muted = opts.projectId ? this.d.store.mutedByDevice() : null;
+    const targets = this.d.store.listPushSubscriptions()
+      .filter((s) => !(muted && s.deviceId && muted.get(s.deviceId)?.has(opts.projectId!)));
+    await Promise.all(targets.map(async (s) => {
       const sub = { endpoint: s.endpoint, keys: s.keys };
       try {
         const r = await this.sender(sub, payload);

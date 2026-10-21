@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ReviewActions } from '../src/server/actions';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
+import { runTaskChecks } from '../src/server/checks';
 import { isConflictTask } from '../src/server/integrate';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner, type RunInput } from '../src/server/runner/runner';
@@ -36,7 +36,7 @@ function setup() {
     },
     cancel: (id: string) => real.cancel(id),
   };
-  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks, setTimer: () => {} });
+  const orch = new Orchestrator({ store, config, bus, runner, workspaces, runChecks: runTaskChecks, setTimer: () => {} });
   const actions = new ReviewActions({ store, config, bus, workspaces, orchestrator: orch, runner: real });
   const prompts = () => readFileSync(stdin, 'utf8').trim().split('\n').map((l) => JSON.stringify(JSON.parse(l)));
   return { repo, config, store, orch, actions, env, seen, prompts, hooks };

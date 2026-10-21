@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Funnel } from '../components/Funnel';
 import { MetricCard, useMetrics } from '../components/MetricCards';
 import { api } from '../api';
+import { useProject } from '../project';
 
 const KEYCHAIN_HELP: { account: string; text: string }[] = [
   { account: 'revenuecat', text: 'RevenueCat → Project settings → API keys: clave secreta v2 con permiso de solo lectura de Charts/métricas, nada más.' },
@@ -18,6 +19,7 @@ const time = (iso: string) => new Date(iso).toLocaleString('es-ES', { day: 'nume
 
 export function Metrics() {
   const { view, project, loading, error: loadError, reload } = useMetrics();
+  const many = useProject().projects.length > 1;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +33,7 @@ export function Metrics() {
 
   if (loadError && !view) return <div>{devicesLink}<p className="error" role="alert">{loadError}</p><button className="btn" onClick={reload}>Reintentar</button></div>;
   if (loading) return <p className="muted">Cargando…</p>;
-  if (!project || !view) return <div>{devicesLink}<p className="muted">Ningún proyecto tiene métricas en faro.config.ts.</p></div>;
+  if (!project || !view) return <div>{devicesLink}<p className="muted">{many ? 'Este proyecto no tiene métricas en faro.config.ts.' : 'Ningún proyecto tiene métricas en faro.config.ts.'}</p></div>;
 
   const ph = view.status.find((s) => s.source === 'posthog')?.lastOk;
   const funnel = view.funnel;

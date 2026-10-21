@@ -4,19 +4,20 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Bus } from '../src/server/bus';
-import { runChecks } from '../src/server/checks';
-import { getProject } from '../src/server/config';
+import { runTaskChecks } from '../src/server/checks';
+import { getProject, normalizeConfig } from '../src/server/config';
 import { Orchestrator } from '../src/server/orchestrator';
 import { Runner } from '../src/server/runner/runner';
 import { shAbortable } from '../src/server/exec';
 import { FARO_DIR, sandboxProfile } from '../src/server/sandbox';
 import { Store } from '../src/server/store';
+import { createTaskWorkspace } from '../src/server/task-workspace';
 import { GitWorkspaces } from '../src/server/workspaces';
-import { fixture, gitSync, makeConfig, makeRepo, makeTask, tmpDir } from './helpers';
+import { fixture, gitSync, makeConfig, makeMultiConfig, makeRepo, makeTask, tmpDir } from './helpers';
 
 describe('sandboxProfile', () => {
   it('niega el puerto de Faro, su base de datos, artefactos, hooks y ~/.expo; escapa comillas', () => {
-    const p = sandboxProfile({ faroDir: '/faro', dataDir: '/datos "x"', repoPath: '/repo', worktreesDir: '/wt', home: '/casa', ports: [3200, 0] });
+    const p = sandboxProfile({ faroDir: '/faro', dataDir: '/datos "x"', repoPaths: ['/repo'], worktreesDir: '/wt', home: '/casa', ports: [3200, 0] });
     expect(p).toContain('(allow default)');
     expect(p).toContain('(deny network-outbound (remote tcp "*:3200"))');
     expect(p).not.toContain('*:0');
@@ -42,6 +43,71 @@ describe('sandboxProfile', () => {
     for (const a of ['/repo/.git', '/', '/casa', '/casa/Library', '/datos "x"'.replace(/"/g, '\\"')]) expect(p).toContain(`(literal "${a}")`);
   });
 
+  it('con un repo el perfil es el de siempre', () => {
+    const p = sandboxProfile({ faroDir: '/faro', dataDir: '/datos', repoPaths: ['/repo'], worktreesDir: '/wt', home: '/casa', ports: [3200] });
+    expect(p + '\n').toBe(readFileSync(path.join(__dirname, 'fixtures', 'sandbox-un-repo.sb'), 'utf8'));
+  });
+
+  it('con dos repos protege los dos checkouts y permite los worktrees', () => {
+    const p = sandboxProfile({ faroDir: '/faro', dataDir: '/datos', repoPaths: ['/r/a', '/r/b'], worktreesDir: '/wt', home: '/casa', ports: [] });
+    const deny = p.indexOf('(deny file-write* (subpath "/r/a") (subpath "/r/b"))');
+    const allow = p.indexOf('(allow file-write* (subpath "/r/a/.git/objects") (subpath "/r/b/.git/objects") (subpath "/r/a/.git/worktrees") (subpath "/r/b/.git/worktrees") (subpath "/wt"))');
+    expect(deny).toBeGreaterThan(0);
+    expect(allow).toBeGreaterThan(deny);
+    for (const r of ['/r/a', '/r/b']) {
+      expect(p).toContain(`(subpath "${r}/.git/hooks")`);
+      expect(p).toContain(`(literal "${r}/.git/config")`);
+      expect(p).toContain(`(literal "${r}/.git")`);
+    }
+    expect(p).toContain('(literal "/r")');
+  });
+
+  it('readOnly niega escribir en rootPath pero no en los worktrees', () => {
+    const p = sandboxProfile({ faroDir: '/faro', dataDir: '/datos', repoPaths: ['/raiz/a'], readOnly: ['/raiz'], worktreesDir: '/raiz/.wt', home: '/casa', ports: [] });
+    const deny = p.indexOf('(deny file-write* (subpath "/raiz"))');
+    expect(deny).toBeGreaterThan(0);
+    // Seatbelt aplica la última regla que coincide: el allow de los worktrees va después.
+    expect(p.indexOf('(allow file-write* (subpath "/raiz/a/.git/objects") (subpath "/raiz/a/.git/worktrees") (subpath "/raiz/.wt"))')).toBeGreaterThan(deny);
+    // rootPath está protegido entero: no aparece como antepasado suelto.
+    expect(p).not.toContain('(literal "/raiz")');
+  });
+
+  /** Índice de la última línea `(kind file-write* …)` que nombra `(subpath "path")`, o -1. */
+  const lastRule = (profile: string, kind: 'allow' | 'deny', subpath: string) =>
+    profile.split('\n').map((l, i) => (l.startsWith(`(${kind} file-write* `) && l.includes(`(subpath "${subpath}")`) ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+
+  it('otros proyectos: sus checkouts quedan de solo lectura con hooks y config protegidos, y sus worktrees, cerrados', () => {
+    const p = sandboxProfile({
+      faroDir: '/faro', dataDir: '/datos', repoPaths: ['/acme/api', '/acme/movil'], readOnly: ['/acme'], worktreesDir: '/wt/acme', home: '/casa', ports: [],
+      others: [{ repoPaths: ['/demo'], readOnly: [], worktreesDir: '/wt/demo' }],
+    });
+    // Seatbelt aplica la última regla que coincide: ningún allow posterior reabre el checkout de Demo.
+    expect(lastRule(p, 'deny', '/demo')).toBeGreaterThan(0);
+    expect(p).not.toContain('(subpath "/demo/.git/objects")');
+    expect(p).not.toContain('(subpath "/demo/.git/worktrees")');
+    expect(p).toMatch(/\(deny file-write\* [^\n]*\(subpath "\/demo\/\.git\/hooks"\)[^\n]*\(literal "\/demo\/\.git\/config"\)/);
+    expect(p).toContain('(literal "/demo/.git")');
+    // Los worktrees de Demo, cerrados; los de Acme, abiertos.
+    expect(lastRule(p, 'deny', '/wt/demo')).toBeGreaterThan(lastRule(p, 'allow', '/wt/acme'));
+    expect(p).toContain('(allow file-write* (subpath "/acme/api/.git/objects") (subpath "/acme/movil/.git/objects") (subpath "/acme/api/.git/worktrees") (subpath "/acme/movil/.git/worktrees") (subpath "/wt/acme"))');
+  });
+
+  it('otros proyectos anidados: gana la regla de la ruta más profunda', () => {
+    // Los worktrees de Acme dentro de los de Demo: el deny de Demo no los cierra.
+    const a = sandboxProfile({
+      faroDir: '/faro', dataDir: '/datos', repoPaths: ['/acme'], worktreesDir: '/wt/demo/acme', home: '/casa', ports: [],
+      others: [{ repoPaths: ['/demo'], worktreesDir: '/wt/demo' }],
+    });
+    expect(lastRule(a, 'deny', '/wt/demo')).toBeGreaterThan(0);
+    expect(lastRule(a, 'allow', '/wt/demo/acme')).toBeGreaterThan(lastRule(a, 'deny', '/wt/demo'));
+    // Al revés: los worktrees de Demo dentro de los de Acme siguen cerrados.
+    const b = sandboxProfile({
+      faroDir: '/faro', dataDir: '/datos', repoPaths: ['/acme'], worktreesDir: '/wt', home: '/casa', ports: [],
+      others: [{ repoPaths: ['/demo'], worktreesDir: '/wt/demo' }],
+    });
+    expect(lastRule(b, 'deny', '/wt/demo')).toBeGreaterThan(lastRule(b, 'allow', '/wt'));
+  });
+
   it('FARO_DIR es este checkout', () => {
     expect(existsSync(path.join(FARO_DIR, 'src/server/sandbox.ts'))).toBe(true);
   });
@@ -65,7 +131,7 @@ describe.skipIf(process.platform !== 'darwin')('sandbox de agentes (macOS)', () 
     const store = new Store(':memory:');
     const bus = new Bus();
     const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env, killGraceMs: 100 });
-    const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks, setTimer: () => {} });
+    const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks: runTaskChecks, setTimer: () => {} });
     const project = getProject(config, 'demo');
     const run = async () => {
       const t = store.createTask(project, { title: 'Sandbox', description: '', profileId: 'dev', level: 2 });
@@ -123,7 +189,7 @@ describe.skipIf(process.platform !== 'darwin')('sandbox de agentes (macOS)', () 
       const home = tmpDir('faro-home-');
       // Un «checkout de Faro» de mentira: el test intenta renombrarlo.
       const faroDir = tmpDir('faro-self-');
-      const profile = sandboxProfile({ faroDir, dataDir: config.dataDir, repoPath: repo, worktreesDir: project.worktreesDir, home, ports: [] });
+      const profile = sandboxProfile({ faroDir, dataDir: config.dataDir, repoPaths: [repo], worktreesDir: project.worktreesDir, home, ports: [] });
       const sh = (cmd: string, cwd = wt.path) => shAbortable(cmd, cwd, { sandboxProfile: profile });
       return { repo, config, wt, home, faroDir, sh };
     }
@@ -210,6 +276,66 @@ describe.skipIf(process.platform !== 'darwin')('sandbox de agentes (macOS)', () 
       expect(readFileSync(v, 'utf8')).toBe('secreto');
       // El resto de dataDir sigue escribible.
       expect((await s.sh(`mkdir -p '${path.join(d, 'worktrees')}' && echo y > '${path.join(d, 'worktrees', 'w.txt')}'`)).code).toBe(0);
+    });
+
+    it('varios repos: git add/diff en cada worktree funcionan; los checkouts y rootPath no se pueden escribir', async () => {
+      const config = makeMultiConfig();
+      const project = getProject(config, 'multi');
+      const root = tmpDir('faro-raiz-');
+      const task = makeTask({ id: 'MUL-1', projectId: 'multi', title: 'Sandbox' });
+      const wt = await createTaskWorkspace(new GitWorkspaces(), project, task);
+      const repos = project.repos!.map((r) => r.path);
+      const profile = sandboxProfile({
+        faroDir: tmpDir('faro-self-'), dataDir: config.dataDir, repoPaths: repos, readOnly: [root], worktreesDir: project.worktreesDir, home: tmpDir('faro-home-'), ports: [],
+      });
+      const sh = (cmd: string) => shAbortable(cmd, wt.path, { sandboxProfile: profile });
+      for (const id of ['a', 'b']) {
+        const r = await sh(`echo n > ${id}/n.txt && git -C ${id} add -A && git -C ${id} diff --cached --stat`);
+        expect(r.code, `${id}: ${r.stderr}`).toBe(0);
+        expect(r.stdout).toContain('n.txt');
+      }
+      expect((await sh(`echo x > '${path.join(root, 'x.txt')}'`)).code).not.toBe(0);
+      for (const r of repos) expect((await sh(`echo x > '${path.join(r, 'README.md')}'`)).code, r).not.toBe(0);
+      expect(existsSync(path.join(root, 'x.txt'))).toBe(false);
+    });
+
+    it('varios proyectos: un agente de un proyecto no escribe en el checkout, la config de git ni los worktrees de otro; en los suyos, sí', async () => {
+      const single = makeConfig(makeRepo(), { sandbox: true });
+      const multi = makeMultiConfig();
+      const config = normalizeConfig({ ...single, projects: [...single.projects, ...multi.projects] });
+      const demo = getProject(config, 'demo');
+      const acme = getProject(config, 'multi');
+      const store = new Store(':memory:');
+      const bus = new Bus();
+      const runner = new Runner({ store, bus, claudeBin: config.claudeBin, env: {}, killGraceMs: 100 });
+      const orch = new Orchestrator({ store, config, bus, runner, workspaces: new GitWorkspaces(), runChecks: runTaskChecks, setTimer: () => {} });
+      const ws = new GitWorkspaces();
+      const demoWt = await ws.create(demo, makeTask({ id: 'DEM-1', title: 'Demo' }));
+      const acmeWt = await createTaskWorkspace(ws, acme, makeTask({ id: 'MUL-1', projectId: 'multi', title: 'Acme' }));
+      const profileOf = (p: typeof demo) => orch['sandboxFor'](p);
+      const acmeSh = (cmd: string) => shAbortable(cmd, acmeWt.path, { sandboxProfile: profileOf(acme) });
+      const demoConfig = path.join(demo.repoPath, '.git', 'config');
+      const before = readFileSync(demoConfig, 'utf8');
+      for (const cmd of [
+        `printf '[core]\\n\\tsshCommand = x\\n' >> '${demoConfig}'`,
+        `git -C '${demo.repoPath}' config core.sshCommand x`,
+        `echo x > '${path.join(demo.repoPath, 'README.md')}'`,
+        `mkdir -p '${path.join(demo.repoPath, 'node_modules')}'`,
+        `echo x > '${path.join(demoWt.path, 'README.md')}'`,
+        `mkdir -p '${path.join(demo.worktreesDir, 'nuevo')}'`,
+      ]) expect((await acmeSh(cmd)).code, cmd).not.toBe(0);
+      expect(readFileSync(demoConfig, 'utf8')).toBe(before);
+      expect(readFileSync(path.join(demoWt.path, 'README.md'), 'utf8')).toBe('hola\n');
+      expect(existsSync(path.join(demo.worktreesDir, 'nuevo'))).toBe(false);
+      // En sus propios worktrees, sí.
+      const own = await acmeSh('echo n > a/n.txt && git -C a add -A && git -C a diff --cached --stat');
+      expect(own.code, own.stderr).toBe(0);
+      expect(own.stdout).toContain('n.txt');
+      // Y al revés: desde Demo, la config de git de los repos del otro proyecto tampoco.
+      const otherConfig = path.join(acme.repos![0].path, '.git', 'config');
+      const r = await shAbortable(`printf x >> '${otherConfig}'`, demoWt.path, { sandboxProfile: profileOf(demo) });
+      expect(r.code).not.toBe(0);
+      expect((await shAbortable('echo y > y.txt', demoWt.path, { sandboxProfile: profileOf(demo) })).code).toBe(0);
     });
 
     it('no se puede tocar la config global de git', async () => {

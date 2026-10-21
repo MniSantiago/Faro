@@ -199,7 +199,8 @@ export class AsoCollector {
     const sent = this.d.store.getMeta<Sent>(key) ?? {};
     if (sent[kind] === today) return;
     try {
-      await this.d.push.send(msg);
+      // Abre ASO en este proyecto y respeta a los dispositivos que lo silenciaron.
+      await this.d.push.send({ ...msg, url: `${msg.url}?p=${projectId}` }, { projectId });
       this.d.store.setMeta(key, { ...(this.d.store.getMeta<Sent>(key) ?? {}), [kind]: today });
     } catch (e) {
       console.error('[faro] error enviando aviso de ASO', e);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Bus } from '../src/server/bus';
-import { Notifier } from '../src/server/notifier';
+import { noticeTitle, Notifier } from '../src/server/notifier';
 import type { PushMessage } from '../src/server/push';
 import { Store } from '../src/server/store';
 import type { QueueState, Task, TaskState } from '../src/server/types';
@@ -30,7 +30,7 @@ describe('Notifier', () => {
     bus.emitTask(r);
     bus.emitTask(r);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith({ title: 'DEM-1 en revisión', body: 'Arreglar', url: '/#/tarea/DEM-1' });
+    expect(send).toHaveBeenCalledWith({ title: 'DEM-1 en revisión', body: 'Arreglar', url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
   });
 
   it('avisa cuando una tarea termina sola, sin pasar por revisión', () => {
@@ -41,7 +41,7 @@ describe('Notifier', () => {
     // Pasa por «review» en la base de datos, pero Faro no lo emite si se cierra sola.
     store.setState(t.id, 'review', { summary: 'Reel montado' });
     bus.emitTask(store.setState(t.id, 'done'));
-    expect(send).toHaveBeenCalledWith({ title: 'DEM-1 terminada', body: 'Reel montado', url: '/#/tarea/DEM-1' });
+    expect(send).toHaveBeenCalledWith({ title: 'DEM-1 terminada', body: 'Reel montado', url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
   });
 
   it('no avisa al terminar una tarea que aprobaste tú desde revisión', () => {
@@ -68,8 +68,8 @@ describe('Notifier', () => {
     notifier.start();
     bus.emitTask(store.setState(a.id, 'blocked', { questions: [{ id: 'q1', text: '¿Qué rama?' }, { id: 'q2', text: 'Otra' }] }));
     bus.emitTask(store.setState(b.id, 'blocked', { blockedReason: 'Falta permiso' }));
-    expect(send).toHaveBeenNthCalledWith(1, { title: 'DEM-1 necesita tu respuesta', body: '¿Qué rama?', url: '/#/tarea/DEM-1' });
-    expect(send).toHaveBeenNthCalledWith(2, { title: 'DEM-2 necesita tu respuesta', body: 'Falta permiso', url: '/#/tarea/DEM-2' });
+    expect(send).toHaveBeenNthCalledWith(1, { title: 'DEM-1 necesita tu respuesta', body: '¿Qué rama?', url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
+    expect(send).toHaveBeenNthCalledWith(2, { title: 'DEM-2 necesita tu respuesta', body: 'Falta permiso', url: '/#/tarea/DEM-2' }, { projectId: 'demo' });
   });
 
   it('tarea de rutina bloqueada: título con el nombre de la rutina', () => {
@@ -77,7 +77,7 @@ describe('Notifier', () => {
     const t = go(make({ routineId: 'informe' }), 'queued', 'working');
     notifier.start();
     bus.emitTask(store.setState(t.id, 'blocked', { blockedReason: 'Sin acceso' }));
-    expect(send).toHaveBeenCalledWith({ title: 'La rutina Informe semanal necesita ayuda', body: 'Sin acceso', url: '/#/tarea/DEM-1' });
+    expect(send).toHaveBeenCalledWith({ title: 'La rutina Informe semanal necesita ayuda', body: 'Sin acceso', url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
   });
 
   it('chat a idle: «El Coordinador ha respondido» con 100 letras del resumen', () => {
@@ -85,7 +85,7 @@ describe('Notifier', () => {
     const t = go(make({ kind: 'chat' }), 'queued', 'working');
     notifier.start();
     bus.emitTask(store.setState(t.id, 'idle', { summary: 'x'.repeat(150) }));
-    expect(send).toHaveBeenCalledWith({ title: 'El Coordinador ha respondido', body: 'x'.repeat(100), url: '/#/tarea/DEM-1' });
+    expect(send).toHaveBeenCalledWith({ title: 'El Coordinador ha respondido', body: 'x'.repeat(100), url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
   });
 
   it('aprobación pendiente nueva: un aviso; las ya vistas al arrancar, ninguno', () => {
@@ -151,7 +151,7 @@ describe('Notifier', () => {
     store.addApproval(b.id, 'push', 'pending');
     bus.emitTask(b);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0]).toMatchObject({ title: 'Cambios sin subir en Demo', url: '/#/bandeja' });
+    expect(send.mock.calls[0][0]).toMatchObject({ title: 'Cambios sin subir en Demo', url: '/#/bandeja?p=demo' });
     for (const t of [a, b]) for (const ap of store.listApprovals(t.id)) store.decideApproval(ap.id, 'approved');
     bus.emitTask(a);
     store.addApproval(a.id, 'push', 'pending');
@@ -179,5 +179,42 @@ describe('Notifier', () => {
     go(t, 'queued', 'working', 'review');
     again.checkStale(new Date(Date.now() + 50 * 3600_000));
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('con un solo proyecto el título no cambia y el aviso lleva el proyecto', () => {
+    const { bus, send, make, go, notifier } = setup();
+    const t = go(make(), 'queued', 'working');
+    notifier.start();
+    bus.emitTask(go(t, 'review'));
+    expect(send).toHaveBeenCalledWith({ title: 'DEM-1 en revisión', body: 'Arreglar', url: '/#/tarea/DEM-1' }, { projectId: 'demo' });
+  });
+
+  it('con dos proyectos el título lleva el nombre; la pausa de cola (global) no lleva proyecto', () => {
+    const config = makeConfig(makeRepo());
+    const other = makeConfig(makeRepo()).projects[0];
+    config.projects.push({ ...other, id: 'otro', name: 'Acme', prefix: 'ACM' });
+    const store = new Store(':memory:');
+    const bus = new Bus();
+    const send = vi.fn(async (_m: PushMessage, _o?: { projectId?: string }) => ({ sent: 0, failed: 0 }));
+    new Notifier({ store, bus, push: { send }, config }).start();
+    const t = store.createTask(config.projects[1], { title: 'Arreglar', description: '', profileId: 'dev', level: 2 });
+    store.setState(t.id, 'queued'); store.setState(t.id, 'working');
+    bus.emitTask(store.setState(t.id, 'review'));
+    expect(send).toHaveBeenLastCalledWith({ title: 'Acme · ACM-1 en revisión', body: 'Arreglar', url: '/#/tarea/ACM-1' }, { projectId: 'otro' });
+    bus.emitQueue(queue({ paused: true, reason: 'auth' }));
+    expect(send).toHaveBeenLastCalledWith({ title: 'Cola en pausa: sesión de Claude caducada', body: 'Las tareas esperan hasta que reanudes la cola.', url: '/#/bandeja' });
+  });
+});
+
+describe('noticeTitle', () => {
+  const two = [{ id: 'demo', name: 'Demo' }, { id: 'acme', name: 'Acme' }];
+  it('con un solo proyecto no lleva nombre', () => {
+    expect(noticeTitle([two[0]], 'DEM-1 en revisión', 'demo')).toBe('DEM-1 en revisión');
+  });
+  it('con varios, el nombre delante; sin proyecto o si ya lo nombra, tal cual', () => {
+    expect(noticeTitle(two, 'ACM-1 en revisión', 'acme')).toBe('Acme · ACM-1 en revisión');
+    expect(noticeTitle(two, 'Cola en pausa')).toBe('Cola en pausa');
+    expect(noticeTitle(two, 'Cambios sin subir en Acme', 'acme')).toBe('Cambios sin subir en Acme');
+    expect(noticeTitle(two, 'X', 'borrado')).toBe('X');
   });
 });

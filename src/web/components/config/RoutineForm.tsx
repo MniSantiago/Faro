@@ -4,6 +4,7 @@ import type { ConfigFull, ConfigRoutineView, RoutineContext } from '../../../ser
 import type { Level } from '../../../server/types';
 import { api, LEVEL_LABEL, type RoutineDraft } from '../../api';
 import { emptyForm, fmtBudget, formFromRoutine, sameForm, switchKind, timeOf, toBody, type RoutineFormState } from '../../routine-form';
+import { useProject } from '../../project';
 import { cronFromSchedule, scheduleError, scheduleFromCron, type Schedule } from '../../schedule';
 
 type Kind = Schedule['kind'];
@@ -59,7 +60,8 @@ export function RoutineForm({ full, routine, enabled, local, onDirty, onSaved }:
   const firstProfile = full.profiles[0]?.id ?? '';
   const base = routine ? formFromRoutine(routine, enabled) : emptyForm(firstProfile);
   const [f, setF] = useState<RoutineFormState>(base);
-  const [projectId, setProjectId] = useState(routine?.projectId ?? full.projects[0]?.id ?? '');
+  const current = useProject().projectId;
+  const [projectId, setProjectId] = useState(routine?.projectId ?? current ?? full.projects[0]?.id ?? '');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [description, setDescription] = useState('');

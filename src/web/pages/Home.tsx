@@ -1,29 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api, subscribe, type ConfigView, type HomeView } from '../api';
+import { api, subscribe, type HomeView } from '../api';
 import { Sparkline } from '../components/Sparkline';
-import { deltaTone, formatDelta, formatMetric, loadHomeProject, saveHomeProject } from '../home';
+import { deltaTone, formatDelta, formatMetric } from '../home';
+import { useProject } from '../project';
 import type { HomeTile, HealthLine } from '../../server/home';
-
-/** Proyectos y proyecto elegido en la home (recordado en el navegador; si ya no existe, el primero). */
-export function useHomeProject(): { projects: ConfigView['projects']; project: string | null; setProject: (id: string) => void; loaded: boolean; error: string | null } {
-  const [projects, setProjects] = useState<ConfigView['projects']>([]);
-  const [project, setProjectState] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let ignore = false;
-    api.config().then((c) => {
-      if (ignore) return;
-      setProjects(c.projects);
-      setLoaded(true);
-      const saved = loadHomeProject();
-      setProjectState(c.projects.find((p) => p.id === saved)?.id ?? c.projects[0]?.id ?? null);
-    }).catch((e: Error) => { if (!ignore) setError(e.message); });
-    return () => { ignore = true; };
-  }, []);
-  const setProject = (id: string) => { saveHomeProject(id); setProjectState(id); };
-  return { projects, project, setProject, loaded, error };
-}
 
 function Tile({ t }: { t: HomeTile }) {
   if (!t.configured) {
@@ -52,7 +32,7 @@ function Tile({ t }: { t: HomeTile }) {
 const Dot = ({ tone }: { tone: HealthLine['tone'] }) => <span className={`hl-dot ${tone}`} aria-hidden="true" />;
 
 export function Home() {
-  const { projects, project, setProject, loaded, error: configError } = useHomeProject();
+  const { projectId: project } = useProject();
   const [view, setView] = useState<HomeView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,27 +61,18 @@ export function Home() {
     // avisos no paren (con agentes trabajando llegan seguidos y un temporizador que se reinicia no llegaría a saltar).
     const loadSoon = () => { if (timer === undefined) timer = setTimeout(load, 1000); };
     // La carga inicial la hace `onOpen` (también si la conexión SSE ya estaba abierta) y se repite al reconectar.
-    const off = subscribe((m) => { if (m.type === 'task') loadSoon(); }, load);
+    // Solo las tareas de este proyecto: las de los demás no cambian su home.
+    const off = subscribe((m) => { if (m.type === 'task' && m.task.projectId === project) loadSoon(); }, load);
     return () => { ignore = true; off(); clearTimeout(timer); };
   }, [project]);
 
-  const err = configError ?? error;
-  if (err && !view) return <p className="error" role="alert">{err}</p>;
-  if (!loaded) return <p className="muted">Cargando…</p>;
+  if (error && !view) return <p className="error" role="alert">{error}</p>;
   if (!project) return <p className="muted">No hay proyectos en faro.config.ts.</p>;
   if (!view) return <p className="muted">Cargando…</p>;
 
   const { headline: h } = view;
   return (
     <div className="home">
-      {projects.length > 1 && project && (
-        <label className="home-project">
-          <span className="muted">Proyecto</span>
-          <select value={project} onChange={(e) => setProject(e.target.value)}>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      )}
       <section className="hero">
         <div className="hero-text">
           <h1>{h.text}</h1>

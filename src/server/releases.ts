@@ -6,6 +6,7 @@ import { ActionError } from './errors';
 import { shAbortable } from './exec';
 import { decide } from './policy';
 import type { Store } from './store';
+import { releaseRepo, repoView } from './task-repos';
 import type { FaroConfig, FinalAction, Job, JobKind } from './types';
 import type { Workspaces } from './workspaces';
 
@@ -74,7 +75,7 @@ export class Releases {
     const { store } = this.d;
     const t = store.getTask(taskId);
     if (t.release === 'none') return;
-    if (!getProject(this.d.config, t.projectId).release) {
+    if (!releaseRepo(getProject(this.d.config, t.projectId))) {
       this.note(taskId, 'Pediste un lanzamiento, pero el proyecto no tiene configuración de EAS.');
       return;
     }
@@ -131,7 +132,9 @@ export class Releases {
       this.note(j.taskId, interruptedNote(j.kind, 'reinicio'));
       try {
         const project = getProject(this.d.config, this.d.store.getTask(j.taskId).projectId);
-        void this.d.workspaces.removeWorktree(project, path.join(project.worktreesDir, `_release-${j.taskId}-${j.id}`)).catch(() => {});
+        const rr = releaseRepo(project);
+        if (!rr) continue;
+        void this.d.workspaces.removeWorktree(repoView(project, rr), path.join(project.worktreesDir, `_release-${j.taskId}-${j.id}`)).catch(() => {});
       } catch { /* sin proyecto: nada que limpiar */ }
     }
   }
@@ -172,7 +175,11 @@ export class Releases {
     const { store, config, workspaces } = this.d;
     const task = store.getTask(job.taskId);
     const project = getProject(config, task.projectId);
-    const rc = project.release!;
+    // Los builds salen del repo que tiene `release` (en un proyecto de un repo, el único).
+    const rrepo = releaseRepo(project);
+    if (!rrepo) throw new Error('El proyecto no tiene configuración de EAS');
+    const rproject = repoView(project, rrepo);
+    const rc = rrepo.release!;
     const commit = store.getMeta<string>(`release-commit:${task.id}`);
     if (!commit) throw new Error('No se sabe qué commit lanzar');
     let cmd = job.kind === 'build' ? rc.build : rc.submit;
@@ -185,7 +192,7 @@ export class Releases {
     const dir = path.join(config.dataDir, 'artifacts', task.id);
     await fs.mkdir(dir, { recursive: true });
     const logPath = path.join(dir, `${job.kind}-${job.id}.log`);
-    const wt = await workspaces.createDetached(project, `_release-${task.id}-${job.id}`, commit);
+    const wt = await workspaces.createDetached(rproject, `_release-${task.id}-${job.id}`, commit);
     try {
       const r = await shAbortable(cmd, path.join(wt, rc.cwd), {
         timeoutMs: (rc.timeoutMinutes ?? 90) * 60_000, signal: ac.signal, env: this.d.env ?? process.env,
@@ -215,7 +222,7 @@ export class Releases {
       const why = r.code === 130 ? 'parado por el usuario' : r.code === 124 ? 'tiempo agotado' : `${r.stderr || r.stdout}`.trim().slice(-600);
       this.note(task.id, `El ${LABEL[job.kind]} falló (${why}). Pulsa Reintentar para volver a lanzarlo.`);
     } finally {
-      await workspaces.removeWorktree(project, wt).catch(() => {});
+      await workspaces.removeWorktree(rproject, wt).catch(() => {});
     }
   }
 }

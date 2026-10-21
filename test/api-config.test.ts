@@ -9,7 +9,7 @@ import { LiveConfig } from '../src/server/overrides';
 import { Scheduler } from '../src/server/scheduler';
 import { Store } from '../src/server/store';
 import type { BusMessage, RoutineConfig } from '../src/server/types';
-import { makeConfig, makeRepo, tmpDir } from './helpers';
+import { makeConfig, makeMultiConfig, makeRepo, tmpDir } from './helpers';
 
 function setup(seed?: (store: Store) => void, extraRoutines: RoutineConfig[] = []) {
   const repo = makeRepo();
@@ -211,6 +211,28 @@ describe('API de configuración', () => {
     expect(config.profiles.map((x) => x.id)).toEqual(['dev', 'ops', 'coordinador']);
   });
 
+  it('proyecto multi-repo: la vista lista cada repo y la rama base no se cambia desde el panel', async () => {
+    const raw = makeMultiConfig({ port: 3200 });
+    const store = new Store(':memory:');
+    const live = new LiveConfig({ raw, store, onChange: () => {} });
+    const app = buildApp({
+      store, config: live.config, live, secretExists: vi.fn(async () => false), claudeVersion: () => null,
+      actions: {} as never, orchestrator: {} as never, bus: new Bus(), scheduler: { list: () => [], runNow: vi.fn(), toggle: vi.fn() } as never, releases: {} as never,
+    });
+    const local = (o: InjectOptions) => app.inject({ ...o, headers: { host: '127.0.0.1:3200', 'x-faro': '1', ...o.headers } });
+    const [p] = (await full(local)).projects;
+    expect(p.multiRepo).toBe(true);
+    expect(p.readonly.repos.map((r: { id: string; baseBranch: string; checks: { name: string }[] }) => [r.id, r.baseBranch, r.checks.map((c) => c.name)]))
+      .toEqual([['a', 'main', ['ca']], ['b', 'main', ['cb']]]);
+    const bad = await local({ method: 'PATCH', url: '/api/config/projects/multi', payload: { baseBranch: 'dev' } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toContain('faro.config.ts');
+    // Guardar el formulario entero (con la misma rama base) sí funciona.
+    const ok = await local({ method: 'PATCH', url: '/api/config/projects/multi', payload: { baseBranch: 'main', maxConcurrentRuns: 3 } });
+    expect(ok.statusCode).toBe(200);
+    expect(live.config.projects[0]!.maxConcurrentRuns).toBe(3);
+  });
+
   it('Mac: PATCH de proyecto (github fusionado) y de Generales', async () => {
     const { local, config } = setup();
     await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { github: { ci: true } } });
@@ -227,6 +249,25 @@ describe('API de configuración', () => {
     const bad = await local({ method: 'PATCH', url: '/api/config/general', payload: { coordinatorProfile: 'fantasma' } });
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error).toContain('perfil desconocido');
+  });
+
+  it('maxConcurrentRuns: por proyecto editable (entero ≥ 1) y global opcional que se puede quitar', async () => {
+    const { local, config } = setup();
+    expect((await full(local)).projects[0]).toMatchObject({ maxConcurrentRuns: null });
+    const p = await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { maxConcurrentRuns: 3 } });
+    expect(p.statusCode).toBe(200);
+    expect(p.json()).toMatchObject({ maxConcurrentRuns: 3, origin: 'editada' });
+    expect(config.projects[0]!.maxConcurrentRuns).toBe(3);
+    for (const bad of [0, 1.5, -1]) {
+      expect((await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { maxConcurrentRuns: bad } })).statusCode).toBe(400);
+    }
+    const q = await local({ method: 'PATCH', url: '/api/config/projects/demo', payload: { maxConcurrentRuns: null } });
+    expect(q.json()).toMatchObject({ maxConcurrentRuns: null });
+    expect(config.projects[0]!.maxConcurrentRuns).toBeUndefined();
+    const g = await local({ method: 'PATCH', url: '/api/config/general', payload: { maxConcurrentRuns: null } });
+    expect(g.statusCode).toBe(200);
+    expect(g.json()).toMatchObject({ maxConcurrentRuns: null });
+    expect(config.maxConcurrentRuns).toBeUndefined();
   });
 
   it('PATCH de Proyecto y Generales sobre un override guardado que no se aplica: sale bien y lo sustituye', async () => {

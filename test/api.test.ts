@@ -38,7 +38,35 @@ describe('API', () => {
   it('config expone proyectos y perfiles', async () => {
     const { app } = setup();
     const r = await inj(app, { method: 'GET', url: '/api/config' });
-    expect(r.json()).toEqual({ projects: [{ id: 'demo', name: 'Demo', prefix: 'DEM', release: false, metrics: false, aso: false }], profiles: [{ id: 'dev', name: 'Dev', defaultLevel: 2 }], coordinatorProfile: 'coordinador', title: 'Faro' });
+    expect(r.json()).toEqual({ projects: [{ id: 'demo', name: 'Demo', prefix: 'DEM', release: false, metrics: false, aso: false, plan: false, repos: [{ id: 'main', name: 'main' }], multiRepo: false }], profiles: [{ id: 'dev', name: 'Dev', defaultLevel: 2 }], coordinatorProfile: 'coordinador', title: 'Faro' });
+  });
+
+  it('release en repos[1]: /api/config lo ofrece; repos inválidos dan 400', async () => {
+    const { app, config } = setup();
+    const p = config.projects[0];
+    const single = p.repos!;
+    const post = (repos: string[]) => inj(app, { method: 'POST', url: '/api/tasks', payload: { projectId: 'demo', title: 'T', profileId: 'dev', draft: true, repos } });
+    expect((await post(['main'])).statusCode).toBe(200);
+    const nope = await post(['x']);
+    expect(nope.statusCode).toBe(400);
+    expect(nope.json().error).toBe('Repo desconocido: x');
+    expect((await post([])).statusCode).toBe(400);
+    p.repos = [{ ...single[0], id: 'a' }, { ...single[0], id: 'b', release: { cwd: '.', build: 'b', submit: 's' } }];
+    const dup = await post(['a', 'a']);
+    expect(dup.statusCode).toBe(400);
+    expect(dup.json().error).toContain('repetidos');
+    expect((await inj(app, { method: 'GET', url: '/api/config' })).json().projects[0].release).toBe(true);
+  });
+
+  it('crear una tarea con release sin el repo que se publica da 400', async () => {
+    const { app, config } = setup();
+    const p = config.projects[0];
+    p.repos = [{ ...p.repos![0], id: 'a' }, { ...p.repos![0], id: 'b', release: { cwd: '.', build: 'b', submit: 's' } }];
+    const body = { projectId: 'demo', title: 'T', profileId: 'dev', release: 'build', draft: true };
+    const bad = await inj(app, { method: 'POST', url: '/api/tasks', payload: { ...body, repos: ['a'] } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toContain('Esta tarea no incluye el repo que se publica');
+    expect((await inj(app, { method: 'POST', url: '/api/tasks', payload: { ...body, repos: ['b'] } })).statusCode).toBe(200);
   });
 
   it('POST /api/tasks con release en un proyecto sin lanzamientos: 400; GET trae jobs', async () => {
@@ -116,6 +144,106 @@ describe('API', () => {
     expect(body.tasks[rev.id]).toMatchObject({ costUsd: 1.5, turns: 1, contextWindow: 200000 });
     expect(body.tasks[done.id]).toBeUndefined();
     expect(body.spend.today).toBeCloseTo(3);
+  });
+
+  /** Segundo proyecto («acme», ACM-*) junto a «demo», con una tarea viva en cada uno. */
+  function setupTwo() {
+    const s = setup();
+    const demo = getProject(s.config, 'demo');
+    s.config.projects.push({ ...demo, id: 'acme', name: 'Acme', prefix: 'ACM', routines: [{ id: 'acme-r', name: 'Rutina Acme', profileId: 'dev', level: 2, title: 'x', prompt: 'x', cron: '0 9 * * *' }] });
+    s.config.projects[0].routines = [{ id: 'dem-r', name: 'Rutina Demo', profileId: 'dev', level: 2, title: 'x', prompt: 'x', cron: '0 9 * * *' }];
+    const mk = (id: string, title: string) => s.store.createTask(getProject(s.config, id), { title, description: '', profileId: 'dev', level: 2 });
+    return { ...s, mk };
+  }
+
+  it('GET /api/tasks?project= solo devuelve las del proyecto; desconocido da 400', async () => {
+    const { app, mk } = setupTwo();
+    mk('demo', 'a'); mk('acme', 'b'); mk('acme', 'c');
+    const ids = async (url: string) => (await inj(app, { method: 'GET', url })).json().map((t: { id: string }) => t.id);
+    expect(await ids('/api/tasks?project=acme')).toEqual(['ACM-1', 'ACM-2']);
+    expect(await ids('/api/tasks?project=demo')).toEqual(['DEM-1']);
+    expect((await ids('/api/tasks')).length).toBe(3);
+    const bad = await inj(app, { method: 'GET', url: '/api/tasks?project=nope' });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('historial paginado por proyecto', async () => {
+    const { app, store, mk } = setupTwo();
+    for (const [p, n] of [['demo', 2], ['acme', 3]] as const) {
+      for (let i = 0; i < n; i++) { const t = mk(p, `t${i}`); store.setState(t.id, 'discarded'); }
+    }
+    const page = async (q: string) => (await inj(app, { method: 'GET', url: `/api/tasks?state=done,discarded&limit=2&${q}` })).json().map((t: { id: string }) => t.id);
+    expect(await page('project=acme&offset=0')).toEqual(['ACM-3', 'ACM-2']);
+    expect(await page('project=acme&offset=2')).toEqual(['ACM-1']);
+    expect(await page('project=demo&offset=0')).toEqual(['DEM-2', 'DEM-1']);
+  });
+
+  it('stats?project= trae el gasto y las tareas vivas del proyecto', async () => {
+    const { app, store, mk } = setupTwo();
+    for (const [p, cost] of [['demo', 1], ['acme', 4]] as const) {
+      const t = mk(p, 'x');
+      store.setState(t.id, 'queued'); store.setState(t.id, 'working');
+      store.finishRun(store.startRun(t.id, 's').id, 'done', { input: 1, output: 1, costUsd: cost });
+      store.setState(t.id, 'review');
+    }
+    const body = (await inj(app, { method: 'GET', url: '/api/stats?project=acme' })).json();
+    expect(Object.keys(body.tasks)).toEqual(['ACM-1']);
+    expect(body.spend.today).toBeCloseTo(4);
+    expect(Object.keys((await inj(app, { method: 'GET', url: '/api/stats' })).json().tasks).sort()).toEqual(['ACM-1', 'DEM-1']);
+    expect((await inj(app, { method: 'GET', url: '/api/stats?project=nope' })).statusCode).toBe(400);
+  });
+
+  it('routines y push-state aceptan ?project=', async () => {
+    const { app } = setupTwo();
+    expect((await inj(app, { method: 'GET', url: '/api/routines?project=nope' })).statusCode).toBe(400);
+    expect((await inj(app, { method: 'GET', url: '/api/routines?project=acme' })).statusCode).toBe(200);
+    expect((await inj(app, { method: 'GET', url: '/api/push-state?project=nope' })).statusCode).toBe(400);
+    expect((await inj(app, { method: 'GET', url: '/api/push-state?project=acme' })).json()).toEqual({ projects: [] });
+  });
+
+  it('config: plan solo si el proyecto tiene backlog, release o github', async () => {
+    const { app, config } = setup();
+    const p = config.projects[0];
+    const plan = async () => (await inj(app, { method: 'GET', url: '/api/config' })).json().projects[0].plan;
+    expect(await plan()).toBe(false);
+    p.backlogFile = '/tmp/backlog.json';
+    expect(await plan()).toBe(true);
+    p.backlogFile = undefined;
+    p.github = { ci: true };
+    expect(await plan()).toBe(true);
+    p.github = undefined;
+    p.repos = [{ ...p.repos![0], id: 'a' }, { ...p.repos![0], id: 'b', release: { cwd: '.', build: 'b', submit: 's' } }];
+    expect(await plan()).toBe(true);
+  });
+
+  it('push-state: en multi-repo, la rama base y los commits de cada repo que va por delante', async () => {
+    const s = setup();
+    const p = s.config.projects[0];
+    p.repos = [
+      { ...p.repos![0], id: 'a', name: 'Alfa', path: '/r/a', baseBranch: 'main' },
+      { ...p.repos![0], id: 'b', path: '/r/b', baseBranch: 'develop', remote: 'up' },
+      { ...p.repos![0], id: 'c', path: '/r/c' },
+    ];
+    const ahead: Record<string, number> = { '/r/a': 0, '/r/b': 2, '/r/c': 1 };
+    const workspaces = { ahead: async (x: { repoPath: string }) => ahead[x.repoPath] } as unknown as GitWorkspaces;
+    const app = buildApp({ store: s.store, config: s.config, actions: s.actions, orchestrator: s.orchState, bus: s.bus, workspaces,
+      scheduler: { list: () => [], runNow: vi.fn(), toggle: vi.fn() }, releases: { request: vi.fn(), retry: vi.fn(), stop: vi.fn() } });
+    const [st] = (await inj(app, { method: 'GET', url: '/api/push-state' })).json().projects;
+    expect(st.multiRepo).toBe(true);
+    expect(st.ahead).toBe(3);
+    expect(st.repos).toEqual([
+      { id: 'b', name: 'b', remote: 'up', baseBranch: 'develop', ahead: 2 },
+      { id: 'c', name: 'c', remote: p.repos[2].remote, baseBranch: p.repos[2].baseBranch, ahead: 1 },
+    ]);
+  });
+
+  it('config lista los repos de cada proyecto', async () => {
+    const { app, config } = setup();
+    const p = config.projects[0];
+    p.repos = [{ ...p.repos![0], id: 'a', name: 'Alfa' }, { ...p.repos![0], id: 'b' }];
+    const r = (await inj(app, { method: 'GET', url: '/api/config' })).json();
+    expect(r.projects[0].repos).toEqual([{ id: 'a', name: 'Alfa' }, { id: 'b', name: 'b' }]);
+    expect(r.projects[0].multiRepo).toBe(true);
   });
 
   it('/api/tasks/:id trae stats.turns', async () => {
@@ -418,6 +546,24 @@ describe('API push', () => {
     expect(store.listPushSubscriptions()[0].deviceId).toBe(device.id);
     await inj(app, { method: 'POST', url: `/api/devices/${device.id}/revoke`, headers: { 'x-faro': '1' } });
     expect(store.listPushSubscriptions()).toEqual([]);
+  });
+});
+
+describe('API de avisos por proyecto', () => {
+  it('GET/POST /api/devices/:id/projects: silenciar, reactivar, 404 y 400', async () => {
+    const { app, store } = setup();
+    const device = store.createDevice('iPhone', 'hash');
+    const h = { 'x-faro': '1' };
+    const get = async () => (await inj(app, { method: 'GET', url: `/api/devices/${device.id}/projects` })).json();
+    expect(await get()).toEqual({ projects: [{ id: 'demo', name: 'Demo', muted: false }] });
+    expect((await inj(app, { method: 'POST', url: `/api/devices/${device.id}/projects`, payload: { projectId: 'demo', on: false }, headers: h })).statusCode).toBe(200);
+    expect(store.mutedProjects(device.id)).toEqual(['demo']);
+    expect((await get()).projects[0].muted).toBe(true);
+    await inj(app, { method: 'POST', url: `/api/devices/${device.id}/projects`, payload: { projectId: 'demo', on: true }, headers: h });
+    expect(store.mutedProjects(device.id)).toEqual([]);
+    expect((await inj(app, { method: 'POST', url: `/api/devices/${device.id}/projects`, payload: { projectId: 'nope', on: false }, headers: h })).statusCode).toBe(400);
+    expect((await inj(app, { method: 'POST', url: '/api/devices/zzz/projects', payload: { projectId: 'demo', on: false }, headers: h })).statusCode).toBe(404);
+    expect((await inj(app, { method: 'GET', url: '/api/devices/zzz/projects' })).statusCode).toBe(404);
   });
 });
 

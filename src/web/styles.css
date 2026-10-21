@@ -44,6 +44,15 @@ textarea, input, select { width: 100%; font: inherit; padding: 8px 10px; border-
 .form .row label { flex: 1; min-width: 160px; }
 .form .check { display: flex; gap: 8px; align-items: center; }
 .form .check input { width: auto; }
+/* Dispositivos: avisos por proyecto. */
+.dev-projects { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+.dev-projects .check { display: flex; gap: 8px; align-items: center; }
+.dev-projects .check input { width: auto; }
+.dev-projects .error { flex-basis: 100%; margin: 0; }
+/* Nueva tarea multi-repo: una casilla por repo. */
+.form .repos { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.form .repos legend { padding: 0; margin-bottom: 4px; }
+.form .repos .error { flex-basis: 100%; margin: 0; }
 .error { color: var(--bad); }
 .log, .diff { border: 1px solid var(--line); border-radius: 8px; background: var(--card); overflow-x: auto; max-height: 520px; overflow-y: auto; }
 .log pre, .diff pre { margin: 0; padding: 1px 12px; font: 12.5px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
@@ -242,8 +251,6 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
 
 /* Home: titular, 4 cifras, salud y semana (maqueta «home-mix»). */
 .home { display: grid; gap: 12px; }
-.home-project { display: flex; gap: 8px; align-items: center; justify-self: start; font-size: 14px; }
-.home-project select { width: auto; }
 .hero { display: flex; gap: 14px; align-items: center; padding: 16px 18px; border-radius: 12px; background: var(--hero-bg); color: var(--hero-fg); border: 1px solid var(--hero-bg); }
 @media (prefers-color-scheme: dark) { .hero { border-color: var(--line); } }
 .hero-text { flex: 1; min-width: 0; }
@@ -300,6 +307,9 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .tabbar { display: none; }
   .sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 16px 16px 16px 0; border-right: 1px solid var(--line); }
   .sidebar .brand { margin: 0 8px 16px; }
+  /* Selector del proyecto actual (solo con más de un proyecto), bajo la marca. */
+  .side-project { display: block; margin: -6px 8px 14px; }
+  .side-project select { padding: 6px 8px; font-size: 14px; font-weight: 600; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
   .sidebar > a:not(.brand) { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; text-decoration: none; color: var(--muted); }
   .sidebar > a:not(.brand):hover { color: var(--fg); }
   .sidebar > a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--fg); font-weight: 600; }
@@ -342,6 +352,8 @@ code { font-family: ui-monospace, monospace; font-size: 13px; }
   .plus-menu { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 170px; max-height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); overflow-y: auto; display: grid; padding: 6px; border-radius: 12px;
     border: 1px solid var(--line); background: var(--card); box-shadow: 0 8px 24px rgb(0 0 0 / .18); }
   .plus-menu a { padding: 10px 12px; border-radius: 8px; text-decoration: none; font-size: 15px; }
+  .plus-project { display: block; padding: 4px 4px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .plus-project select { font-weight: 600; }
   .plus-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
   .plus-menu a:hover, .plus-menu a:focus-visible { background: var(--bg); }
   /* Home: cifras 2×2 y bloques apilados. */

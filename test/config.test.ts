@@ -1,8 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, getProfile, getProject, loadConfig, normalizeConfig } from '../src/server/config';
-import type { FaroConfig, RoutineConfig } from '../src/server/types';
+import { ConfigError, getProfile, getProject, isMultiRepo, loadConfig, normalizeConfig } from '../src/server/config';
+import type { FaroConfig, FaroConfigInput, RepoConfig, RoutineConfig } from '../src/server/types';
 
 const base = (): FaroConfig => ({
   host: '127.0.0.1',
@@ -188,5 +188,146 @@ describe('faro.config.example.ts', () => {
   });
   it('sin config, el error dice cómo crearla', async () => {
     await expect(loadConfig(path.resolve('no-existe.config.ts'))).rejects.toThrow('faro.config.example.ts');
+  });
+});
+
+describe('multiproyecto: repos, instrucciones y límite por proyecto', () => {
+  const repos = (): RepoConfig[] => [
+    { id: 'mobile', path: '~/A', baseBranch: 'main', remote: 'origin', release: { cwd: '.', build: 'b', submit: 's' } },
+    { id: 'backend', path: '~/B', baseBranch: 'develop', remote: 'origin' },
+  ];
+  const multi = (over: object = {}, repoList = repos()): FaroConfigInput => {
+    const { repoPath: _r, baseBranch: _b, remote: _o, prepare: _p, checks: _c, ...rest } = base().projects[0];
+    return { ...base(), projects: [{ ...rest, repos: repoList, ...over }] };
+  };
+
+  it('normaliza un proyecto sin repos a repos: [main]', () => {
+    const c = normalizeConfig(base());
+    const p = c.projects[0];
+    expect(p.repos).toEqual([{ id: 'main', path: p.repoPath, baseBranch: 'main', remote: 'origin', prepare: [], checks: [] }]);
+    expect(isMultiRepo(p)).toBe(false);
+  });
+
+  it('un proyecto con repos refleja repos[0] en los campos sueltos', () => {
+    const p = normalizeConfig(multi()).projects[0];
+    expect(p.repoPath).toBe(path.join(os.homedir(), 'A'));
+    expect(p.repos![1].path).toBe(path.join(os.homedir(), 'B'));
+    expect(p.baseBranch).toBe('main');
+    expect(p.remote).toBe('origin');
+    expect(p.release).toEqual({ cwd: '.', build: 'b', submit: 's' });
+    expect(isMultiRepo(p)).toBe(true);
+  });
+
+  it('valida los repos de una rutina contra los del proyecto', () => {
+    const rutina = (r: string[]) => ({ id: 'r', name: 'R', profileId: 'ios', level: 1 as const, title: 't', prompt: 'p', repos: r });
+    expect(normalizeConfig(multi({ routines: [rutina(['backend'])] })).projects[0].routines![0].repos).toEqual(['backend']);
+    expect(() => normalizeConfig(multi({ routines: [rutina(['nope'])] }))).toThrow(/Rutina r: repo desconocido nope/);
+    expect(() => normalizeConfig(multi({ routines: [rutina([])] }))).toThrow(/Rutina r: repos necesita/);
+  });
+
+  it('rechaza repos y repoPath a la vez', () => {
+    const raw = multi();
+    (raw.projects[0] as { repoPath?: string }).repoPath = '~/X';
+    expect(() => normalizeConfig(raw)).toThrow(/no ambos/);
+  });
+
+  it('rechaza repos vacíos e ids de repo repetidos', () => {
+    expect(() => normalizeConfig(multi({}, []))).toThrow(/al menos un repo/);
+    const dup = repos().map((r) => ({ ...r, id: 'x' }));
+    expect(() => normalizeConfig(multi({}, dup))).toThrow(/Repo duplicado/);
+  });
+
+  it('rechaza github.prs o github.ci en un proyecto multi-repo', () => {
+    const withGh = (github: object) => multi({}, repos().map((r, i) => (i === 0 ? { ...r, github } : r)));
+    expect(() => normalizeConfig(withGh({ prs: true }))).toThrow(/varios repos/);
+    expect(() => normalizeConfig(withGh({ ci: true }))).toThrow(/varios repos/);
+    expect(() => normalizeConfig(withGh({ ciProfile: 'ios' }))).not.toThrow();
+  });
+
+  it('rechaza profileNotes de un perfil desconocido', () => {
+    expect(() => normalizeConfig(multi({ profileNotes: { ios: 'n' } }))).not.toThrow();
+    expect(() => normalizeConfig(multi({ profileNotes: { nope: 'n' } }))).toThrow(/Proyecto demo: profileNotes: perfil desconocido nope/);
+  });
+
+  it('copyRootClaudeMd es opcional y booleano', () => {
+    expect(() => normalizeConfig(multi({ copyRootClaudeMd: true }))).not.toThrow();
+    expect(normalizeConfig(multi({})).projects[0].copyRootClaudeMd).toBeUndefined();
+    expect(() => normalizeConfig(multi({ copyRootClaudeMd: 'sí' as unknown as boolean }))).toThrow(/Proyecto demo: copyRootClaudeMd debe ser true o false/);
+  });
+
+  it('maxConcurrentRuns global es opcional; el del proyecto debe ser entero ≥ 1', () => {
+    const raw = base();
+    delete (raw as { maxConcurrentRuns?: number }).maxConcurrentRuns;
+    expect(() => normalizeConfig(raw)).not.toThrow();
+    for (const bad of [0, 1.5, -1]) {
+      const r = base();
+      r.projects[0].maxConcurrentRuns = bad;
+      expect(() => normalizeConfig(r)).toThrow(/Proyecto demo: maxConcurrentRuns/);
+    }
+    const ok = base();
+    ok.projects[0].maxConcurrentRuns = 3;
+    expect(() => normalizeConfig(ok)).not.toThrow();
+    const g = base();
+    g.maxConcurrentRuns = 0;
+    expect(() => normalizeConfig(g)).toThrow(/maxConcurrentRuns/);
+  });
+
+  it('una rutina con release y repos sin el repo que se publica es un error de config', () => {
+    const routine = (r: object) => ({ id: 'r', name: 'R', profileId: 'ios', level: 1 as const, title: 'T', prompt: 'P', release: 'build' as const, ...r });
+    expect(() => normalizeConfig(multi({ routines: [routine({ repos: ['backend'] })] }))).toThrow('Esta tarea no incluye el repo que se publica');
+    expect(() => normalizeConfig(multi({ routines: [routine({ repos: ['mobile'] })] }))).not.toThrow();
+    expect(() => normalizeConfig(multi({ routines: [routine({})] }))).not.toThrow();
+  });
+
+  it('release solo en un repo', () => {
+    const two = repos().map((r) => ({ ...r, release: { cwd: '.', build: 'b', submit: 's' } }));
+    expect(() => normalizeConfig(multi({}, two))).toThrow(/un solo repo con release/);
+  });
+
+  it('valida release incompleto y checks por repo, y expande rootPath', () => {
+    const bad = repos();
+    bad[0] = { ...bad[0], release: undefined };
+    bad[1] = { ...bad[1], release: { cwd: '', build: 'b', submit: 's' } };
+    expect(() => normalizeConfig(multi({}, bad))).toThrow(/release incompleto/);
+    const withChecks = repos();
+    withChecks[0] = { ...withChecks[0], checks: [{ name: 't', command: 'npm test' }] };
+    expect(normalizeConfig(multi({}, withChecks)).projects[0].checks).toEqual([{ name: 't', command: 'npm test' }]);
+    expect(normalizeConfig(multi({ rootPath: '~/Acme' })).projects[0].rootPath).toBe(path.join(os.homedir(), 'Acme'));
+  });
+
+  it('worktreesDir no puede ser ni contener un repo ni rootPath (dentro de ellos sí)', () => {
+    const msg = /Proyecto demo: worktreesDir no puede contener un repo ni rootPath/;
+    expect(() => normalizeConfig(multi({ worktreesDir: '~/A' }))).toThrow(msg);
+    expect(() => normalizeConfig(multi({ worktreesDir: '~' }))).toThrow(msg);
+    expect(() => normalizeConfig(multi({ worktreesDir: '~/wt', rootPath: '~/wt/Acme' }))).toThrow(msg);
+    expect(() => normalizeConfig(multi({ worktreesDir: '~/Acme', rootPath: '~/Acme' }))).toThrow(msg);
+    expect(normalizeConfig(multi({ worktreesDir: '~/B/.wt', rootPath: '~/Acme' })).projects[0].worktreesDir).toBe(path.join(os.homedir(), 'B/.wt'));
+    expect(normalizeConfig(multi({ worktreesDir: '~/Acme/.wt', rootPath: '~/Acme' })).projects[0].worktreesDir).toBe(path.join(os.homedir(), 'Acme/.wt'));
+    const one = base();
+    one.projects[0].worktreesDir = '~/code';
+    expect(() => normalizeConfig(one)).toThrow(msg);
+    // Demo: ~/.faro/worktrees/demo con el repo en ~/code/demo.
+    expect(() => normalizeConfig(base())).not.toThrow();
+  });
+
+  it('main con repoPath suelto distinto: error (no hay heurística por id)', () => {
+    const raw = multi({ repoPath: '~/Otro' }, [{ id: 'main', path: '~/A', baseBranch: 'main', remote: 'origin' }]);
+    expect(() => normalizeConfig(raw)).toThrow(/no ambos/);
+  });
+
+  it('normalizar dos veces una config multi-repo es idempotente; también la de un repo', () => {
+    for (const raw of [multi(), base()]) {
+      const once = normalizeConfig(raw);
+      expect(normalizeConfig(once)).toEqual(once);
+    }
+  });
+
+  it('un repo sin path o con path no textual: ConfigError, no TypeError', () => {
+    for (const path of [undefined, 5, '  ']) {
+      const r = repos();
+      r[1] = { ...r[1], path: path as never };
+      expect(() => normalizeConfig(multi({}, r))).toThrow(/Proyecto demo: repo backend: falta path/);
+      expect(() => normalizeConfig(multi({ repoPath: '~/A' }, r))).toThrow(ConfigError);
+    }
   });
 });

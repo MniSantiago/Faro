@@ -2,9 +2,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Bus } from '../src/server/bus';
-import { getProject } from '../src/server/config';
+import { getProject, normalizeConfig } from '../src/server/config';
 import { interruptedNote, parseBuildJson, Releases } from '../src/server/releases';
 import { Store } from '../src/server/store';
+import { releaseRepo } from '../src/server/task-repos';
 import type { Level, Release } from '../src/server/types';
 import { GitWorkspaces } from '../src/server/workspaces';
 import { gitSync, makeConfig, makeRepo, tmpDir } from './helpers';
@@ -14,20 +15,21 @@ const FAKE_EAS = path.resolve('test/fake-eas.mjs');
 function setup(env: Record<string, string> = {}) {
   const repo = makeRepo();
   const base = makeConfig(repo);
-  const config = {
-    ...base,
-    projects: [{ ...base.projects[0], release: { cwd: '.', build: `node ${FAKE_EAS} build`, submit: `node ${FAKE_EAS} submit --id {buildId}`, timeoutMinutes: 1 } }],
-  };
+  const release = { cwd: '.', build: `node ${FAKE_EAS} build`, submit: `node ${FAKE_EAS} submit --id {buildId}`, timeoutMinutes: 1 };
+  const p0 = base.projects[0];
+  const relRepo = makeRepo();
+  // El release vive en repos[1]: repos[0] no lo tiene, así que el espejo de campos sueltos no puede ocultar fallos.
+  const config = { ...base, projects: [{ ...p0, repos: [p0.repos![0], { ...p0.repos![0], id: 'rel', path: relRepo, release }] }] };
   const store = new Store(':memory:');
   const releases = new Releases({ store, config, bus: new Bus(), workspaces: new GitWorkspaces(), env: { ...process.env, ...env } });
   const project = getProject(config, 'demo');
-  const commit = gitSync(repo, 'rev-parse', 'main').trim();
+  const commit = gitSync(relRepo, 'rev-parse', 'main').trim();
   const doneTask = (level: Level, release: Release) => {
     const t = store.createTask(project, { title: 'T', description: '', profileId: 'dev', level, release });
     for (const s of ['queued', 'working', 'review', 'done'] as const) store.setState(t.id, s);
     return t.id;
   };
-  return { repo, store, releases, commit, doneTask };
+  return { repo: relRepo, store, releases, commit, doneTask };
 }
 
 describe('parseBuildJson', () => {
@@ -49,6 +51,39 @@ describe('interruptedNote', () => {
     expect(interruptedNote('submit', 'reinicio')).toContain('al reiniciarse Faro');
     expect(interruptedNote('submit', 'reinicio')).toContain('si el envío llegó a completarse');
     expect(interruptedNote('submit', 'reinicio')).not.toContain('build');
+  });
+});
+
+describe('Releases multi-repo', () => {
+  it('el build de una tarea multi-repo se lanza en el repo con release (aunque no sea el primero)', async () => {
+    const a = makeRepo();
+    const b = makeRepo();
+    writeFileSync(path.join(b, 'solo-en-b.txt'), 'x');
+    gitSync(b, 'add', '.');
+    gitSync(b, 'commit', '-qm', 'b');
+    const data = tmpDir('faro-data-');
+    const ls = path.join(tmpDir(), 'ls.txt');
+    const config = normalizeConfig({
+      host: '127.0.0.1', port: 0, dataDir: data, claudeBin: 'x', maxConcurrentRuns: 2, sandbox: false,
+      projects: [{
+        id: 'multi', name: 'Multi', prefix: 'MUL', worktreesDir: path.join(data, 'wt'), startNumber: 1,
+        repos: [
+          { id: 'a', path: a, baseBranch: 'main', remote: 'origin' },
+          { id: 'b', path: b, baseBranch: 'main', remote: 'origin', release: { cwd: '.', build: `ls > ${ls} && node ${FAKE_EAS} build`, submit: `node ${FAKE_EAS} submit --id {buildId}` } },
+        ],
+      }],
+      profiles: [{ id: 'dev', name: 'Dev', instructions: 'x', defaultLevel: 2, timeoutMinutes: 1 }],
+    });
+    const store = new Store(':memory:');
+    const releases = new Releases({ store, config, bus: new Bus(), workspaces: new GitWorkspaces(), env: { ...process.env } });
+    const project = getProject(config, 'multi');
+    expect(releaseRepo(project)?.id).toBe('b');
+    const t = store.createTask(project, { title: 'T', description: '', profileId: 'dev', level: 4, release: 'build' });
+    for (const s of ['queued', 'working', 'review', 'done'] as const) store.setState(t.id, s);
+    releases.afterIntegrate(t.id, gitSync(b, 'rev-parse', 'main').trim());
+    await releases.waitIdle();
+    expect(store.listJobs(t.id)[0]).toMatchObject({ kind: 'build', state: 'ok' });
+    expect(readFileSync(ls, 'utf8')).toContain('solo-en-b.txt');
   });
 });
 

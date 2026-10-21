@@ -53,6 +53,30 @@ describe('applyOverrides', () => {
     expect(config.profiles[0]!.name).toBe('Desarrollo');
   });
 
+  it('un override de github/checks/baseBranch surte efecto en un proyecto de un repo', () => {
+    const checks = [{ name: 't', command: 'npm test' }];
+    const { config, ignored } = applyOverrides(archivo(), [fila({ kind: 'project', id: 'demo', data: { github: { ci: true }, checks, baseBranch: 'dev' } })]);
+    expect(ignored).toEqual([]);
+    const p = config.projects[0]!;
+    expect(p).toMatchObject({ github: { ci: true }, checks, baseBranch: 'dev' });
+    expect(p.repos![0]).toMatchObject({ github: { ci: true }, checks, baseBranch: 'dev' });
+  });
+
+  it('en un proyecto con repos el override de campos sueltos va a repos[0]', () => {
+    const raw = archivo();
+    const { repoPath: _r, baseBranch: _b, remote: _o, prepare: _p, checks: _c, ...rest } = raw.projects[0]!;
+    raw.projects[0] = { ...rest, repos: [
+      { id: 'a', path: '~/a', baseBranch: 'main', remote: 'origin' },
+      { id: 'b', path: '~/b', baseBranch: 'main', remote: 'origin' },
+    ] } as never;
+    const { config, ignored } = applyOverrides(raw, [fila({ kind: 'project', id: 'demo', data: { baseBranch: 'dev', github: { ciProfile: 'dev' } } })]);
+    expect(ignored).toEqual([]);
+    const p = config.projects[0]!;
+    expect(p.repos![0]).toMatchObject({ baseBranch: 'dev', github: { ciProfile: 'dev' } });
+    expect(p.repos![1]!.baseBranch).toBe('main');
+    expect(p.baseBranch).toBe('dev');
+  });
+
   it('una rutina del panel entra en su proyecto', () => {
     const { config, ignored } = applyOverrides(archivo(), [
       fila({ id: 'diaria', origin: 'panel', data: { ...rutina({ id: 'diaria', cron: '0 7 * * *' }), projectId: 'demo' } }),

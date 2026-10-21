@@ -1,0 +1,8 @@
+(version 1)
+(allow default)
+(deny network-outbound (remote tcp "*:3200"))
+(deny file-write* (subpath "/repo"))
+(allow file-write* (subpath "/repo/.git/objects") (subpath "/repo/.git/worktrees") (subpath "/wt"))
+(deny file-write* (subpath "/faro") (subpath "/datos/artifacts") (subpath "/casa/Library/LaunchAgents") (subpath "/casa/.config/git") (subpath "/repo/.git/hooks") (literal "/repo/.git/config") (literal "/casa/.gitconfig") (literal "/datos/vapid.json") (literal "/") (literal "/datos") (literal "/casa/Library") (literal "/casa") (literal "/casa/.config") (literal "/repo/.git") (regex "^/datos/faro\\.db"))
+(deny file-read* (regex "^/datos/faro\\.db(-wal|-shm|-journal)?$") (literal "/datos/vapid.json"))
+(deny file-read* file-write* (subpath "/casa/.expo"))
