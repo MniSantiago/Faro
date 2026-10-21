@@ -6,6 +6,8 @@ Faro is a self-hosted control panel for running [Claude Code](https://claude.com
 
 > The UI and agent prompts are in Spanish for now. Translations are welcome.
 
+![Faro: an agent works on a task, the checks pass and Faro merges it; then a task across two repos of another project](docs/demo.gif)
+
 ## What it does
 
 - **Tasks in git worktrees.** Each task gets its own branch and worktree, so several agents can work at once without stepping on each other.
@@ -120,6 +122,7 @@ Everything lives in `~/.faro` (or your `dataDir`): `faro.db` (SQLite), `artifact
 - `npm test`: full suite, using a fake `claude`.
 - `npm run smoke`: a real run with the Claude CLI (uses a little of your quota).
 - `npm run typecheck`.
+- `scripts/demo/gif.sh`: regenerates `docs/demo.gif` on a throwaway Faro with a simulated agent (needs ffmpeg and Playwright; see the script).
 
 ## License
 

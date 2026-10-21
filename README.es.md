@@ -4,6 +4,8 @@
 
 Faro es un panel de mando que instalas en tu máquina para orquestar agentes de [Claude Code](https://claude.com/claude-code) sobre tus propios repositorios. Describes una tarea desde la web (o desde el móvil), Faro lanza `claude -p` en un worktree de git aislado, pasa tus comprobaciones y te deja el resultado para revisarlo, integrarlo y subirlo. Es gratis, con licencia MIT, y lo adaptas a tus proyectos con un solo archivo de configuración en TypeScript.
 
+![Faro: un agente trabaja en una tarea, pasan las comprobaciones y Faro la integra; luego, una tarea sobre dos repos de otro proyecto](docs/demo.gif)
+
 ## Qué hace
 
 - **Tareas en worktrees de git.** Cada tarea tiene su rama y su worktree, así que varios agentes trabajan a la vez sin pisarse.
@@ -118,6 +120,7 @@ Todo vive en `~/.faro` (o en tu `dataDir`): `faro.db` (SQLite), `artifacts/`, `w
 - `npm test`: suite completa con un `claude` simulado.
 - `npm run smoke`: prueba real con la CLI de Claude (gasta un poco de cuota).
 - `npm run typecheck`.
+- `scripts/demo/gif.sh`: regenera `docs/demo.gif` con un Faro desechable y un agente simulado (necesita ffmpeg y Playwright; mira el script).
 
 ## Licencia
 
